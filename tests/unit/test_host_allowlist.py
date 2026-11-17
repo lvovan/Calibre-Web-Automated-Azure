@@ -60,3 +60,13 @@ def test_health_exempt_on_any_host(wsgi):
 def test_disabled_when_unset(monkeypatch):
     monkeypatch.delenv(host_allowlist.ENV_VAR, raising=False)
     assert host_allowlist.wrap(_app) is _app
+
+
+def test_exposes_wrapped_app_attributes():
+    class Proxied:
+        is_proxied = True
+
+        def __call__(self, environ, start_response):
+            return _app(environ, start_response)
+
+    assert host_allowlist.HostAllowlist(Proxied(), {"books.example.com"}).is_proxied is True

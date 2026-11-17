@@ -43,6 +43,11 @@ class HostAllowlist:
         self.app = app
         self.allowed = set(allowed_hosts) | _LOOPBACK_HOSTS
 
+    def __getattr__(self, name):
+        # Expose the wrapped middleware's attributes (e.g. ReverseProxied.is_proxied,
+        # read via app.wsgi_app by the admin page and Kobo sync).
+        return getattr(self.app, name)
+
     def __call__(self, environ, start_response):
         if (environ.get("PATH_INFO") in _EXEMPT_PATHS
                 or _hostname(environ.get("HTTP_HOST")) in self.allowed):

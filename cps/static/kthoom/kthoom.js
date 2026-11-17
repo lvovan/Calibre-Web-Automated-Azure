@@ -1140,6 +1140,22 @@ export class KthoomApp {
   }
 
   /**
+   * CWA: loads a book whose pages are served one at a time by the server.
+   * @param {string} name
+   * @param {import('./page.js').Page[]} pages
+   * @returns {Promise<Book>}
+   */
+  loadSingleBookFromPageList(name, pages) {
+    const book = new Book(name);
+    book.setPageList(pages);
+    const bookPromise = new Promise((resolve) => {
+      book.addEventListener(BookEventType.BINDING_COMPLETE, () => resolve(book), { once: true });
+    });
+    this.readingStack_.addBook(book, true);
+    return bookPromise;
+  }
+
+  /**
    * Loads a book from an ArrayBuffer.
    * @param {string} name
    * @param {string} bookUri

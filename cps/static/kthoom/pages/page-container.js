@@ -13,6 +13,9 @@ export class PageContainer {
   /** @type {SVGForeignObjectElement} */
   #foreignObject = null;
 
+  /** CWA: the page currently attached to this container, or -1. */
+  #renderedPageNum = -1;
+
   /**
    * Clones and inflates the page container.
    */
@@ -32,6 +35,7 @@ export class PageContainer {
       el.removeAttribute('width');
     }
     this.#image.setAttribute('href', '');
+    this.#renderedPageNum = -1;
     while (this.#foreignObject.firstChild) {
       this.#foreignObject.lastChild.remove();
     }
@@ -68,6 +72,7 @@ export class PageContainer {
    */
   renderHtml(el, pageNum) {
     this.#g.dataset.pagenum = pageNum;
+    this.#renderedPageNum = pageNum;
     this.#image.style.display = 'none';
     while (this.#foreignObject.firstChild) {
       this.#foreignObject.firstChild.remove();
@@ -83,9 +88,29 @@ export class PageContainer {
    */
   renderRasterImage(url, pageNum) {
     this.#g.dataset.pagenum = pageNum;
+    this.#renderedPageNum = pageNum;
     this.#image.style.display = '';
     this.#foreignObject.style.display = 'none';
     this.#image.setAttribute('href', url);
+  }
+
+  /** @returns {number} CWA: the page whose content is attached, or -1. */
+  getRenderedPageNum() {
+    return this.#renderedPageNum;
+  }
+
+  /**
+   * CWA: detaches the page content (keeping the frame) so the browser can free the decoded image.
+   * @param {number} pageNum The page number this container stands for.
+   */
+  unloadImage(pageNum) {
+    this.#g.dataset.pagenum = pageNum;
+    if (this.#renderedPageNum === -1) return;
+    this.#renderedPageNum = -1;
+    this.#image.removeAttribute('href');
+    while (this.#foreignObject.firstChild) {
+      this.#foreignObject.lastChild.remove();
+    }
   }
 
   /** @param {Box} box */

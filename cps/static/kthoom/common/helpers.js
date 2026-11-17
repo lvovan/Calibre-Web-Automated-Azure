@@ -6,6 +6,8 @@
  * Copyright(c) 2018 Google Inc.
  */
 
+import { config } from '../config.js';
+
 /** @enum */
 export const Key = {
   TAB: 9,
@@ -55,6 +57,10 @@ if (search && search[0] === '?') {
  * Takes Params and updates the browser URL
  */
 export function serializeParamsToBrowser() {
+  // CWA: the reader URL is owned by the server route; do not rewrite it.
+  try {
+    if (config.get('SERIALIZE_PARAMS') === false) return;
+  } catch (e) { /* config not locked: keep upstream behavior */ }
   let paramStr = '';
   let separator = '';
   for (const [key, value] of Object.entries(Params)) {

@@ -44,6 +44,7 @@ from .cw_babel import get_available_locale
 from .usermanagement import login_required_if_no_ano
 from .kobo_sync_status import remove_synced_book
 from . import magic_shelf
+from . import comic_pages as comic_archive
 from .render_template import render_title_template
 from .kobo_sync_status import change_archived_books
 from . import limiter
@@ -1942,6 +1943,67 @@ def serve_book(book_id, book_format, anyname):
             log.info('Serving book: %s', data.name)
             response.headers['Accept-Ranges'] = 'bytes'
         return response
+
+
+COMIC_PAGE_FORMATS = ("cbz", "cbt", "cbr")
+
+
+def _comic_archive_path(book_id, book_format):
+    """Returns the local path of a comic archive the current user may read, or None."""
+    book_format = book_format.lower()
+    if book_format not in COMIC_PAGE_FORMATS or config.config_use_google_drive:
+        return None
+    book = calibre_db.get_filtered_book(book_id)
+    if not book:
+        return None
+    data = calibre_db.get_book_format(book_id, book_format.upper())
+    if not data:
+        return None
+    path = os.path.join(config.get_book_path(), book.path, data.name + "." + book_format)
+    return path if os.path.isfile(path) else None
+
+
+@web.route("/comic/<int:book_id>/<book_format>/pages")
+@login_required_if_no_ano
+@viewer_required
+def comic_pages(book_id, book_format):
+    path = _comic_archive_path(book_id, book_format)
+    if not path:
+        abort(404)
+    try:
+        pages = comic_archive.list_pages(path, config.config_rarfile_location)
+    except (comic_archive.ComicArchiveError, OSError) as ex:
+        log.warning("Comic reader cannot list pages of book %s: %s", book_id, ex)
+        abort(404)
+    response = jsonify(pages=pages)
+    response.headers["Cache-Control"] = "private, no-cache"
+    return response
+
+
+@web.route("/comic/<int:book_id>/<book_format>/page/<int:index>")
+@login_required_if_no_ano
+@viewer_required
+def comic_page(book_id, book_format, index):
+    path = _comic_archive_path(book_id, book_format)
+    if not path:
+        abort(404)
+    try:
+        stat = os.stat(path)
+        etag = "{:x}-{:x}-{}".format(stat.st_mtime_ns, stat.st_size, index)
+        if etag in request.if_none_match:
+            response = make_response("", 304)
+        else:
+            data, mime = comic_archive.read_page(path, index, config.config_rarfile_location)
+            response = make_response(data)
+            response.mimetype = mime
+    except IndexError:
+        abort(404)
+    except (comic_archive.ComicArchiveError, OSError) as ex:
+        log.warning("Comic reader cannot read page %s of book %s: %s", index, book_id, ex)
+        abort(404)
+    response.set_etag(etag)
+    response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
 
 
 @web.route("/download/<int:book_id>/<book_format>", defaults={'anyname': 'None'})

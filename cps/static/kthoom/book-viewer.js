@@ -24,6 +24,10 @@ import { assert, getElem, Params } from './common/helpers.js';
 const BOOK_VIEWER_ELEM_ID = 'bookViewer';
 const SWIPE_THRESHOLD = 50;
 
+// CWA: in long-strip / wide-strip modes, only pages this close to the current page get an image.
+// Upstream attached every page, which exhausts memory on phones for large books.
+const STRIP_RENDER_WINDOW = 3;
+
 const THROBBER_TIMER_MS = 60;
 const MAX_THROBBING_TIME_MS = 10000;
 const NUM_THROBBERS = 4;
@@ -76,6 +80,12 @@ export class BookViewer {
   /** @type {PageContainer[]} */
   #pageContainers = [];
 
+  /**
+   * CWA: set when navigation (not scrolling) changed the page, so strip modes scroll to it.
+   * @type {boolean}
+   */
+  #stripScrollRequested = false;
+
   constructor() {
     this.wheelTimer_ = null;
     this.wheelTurnedPageAt_ = 0;
@@ -90,6 +100,61 @@ export class BookViewer {
     this.throbbingTime_ = 0;
 
     this.#initProgressMeter();
+
+    // CWA: touch scrolling does not produce wheel events, so track the strip position on scroll.
+    let scrollQueued = false;
+    window.addEventListener('scroll', () => {
+      if (scrollQueued || this.getNumPagesInViewer() < 3) return;
+      scrollQueued = true;
+      requestAnimationFrame(() => {
+        scrollQueued = false;
+        this.#syncStripScroll();
+      });
+    }, { passive: true });
+    // CWA: a RemoteImagePage learned its real aspect ratio.
+    window.addEventListener('kthoom-pageaspect', () => this.updateLayout());
+  }
+
+  /** @returns {number} CWA: the current (zero-based) page number, or -1. */
+  getCurrentPageNum() { return this.#currentPageNum; }
+
+  /** CWA: updates the current page from the scroll position in long-strip / wide-strip modes. */
+  #syncStripScroll() {
+    if (!this.#currentBook || this.getNumPagesInViewer() < 3) {
+      return;
+    }
+    const pageSetter = this.getNumPagesInViewer() === 3 ?
+        this.#longStripPageSetter :
+        this.#wideStripPageSetter;
+    const pageBoxes = this.#pageContainers.filter(c => c.isShown()).map(c => c.getBox());
+    const lastPage = Math.max(0, this.#currentBook.getNumberOfPages() - 1);
+    // Scroll offsets are rounded to device pixels, so a programmatic jump can land a fraction of a
+    // pixel above the target page; tolerate a few percent of a page.
+    const newPageNum = Math.min(lastPage, Math.max(0, Math.floor(pageSetter.getScrollPosition(
+        document.documentElement.scrollLeft,
+        document.documentElement.scrollTop,
+        pageBoxes,
+        this.#rotateTimes) + 0.05)));
+    if (newPageNum != this.#currentPageNum) {
+      this.#currentPageNum = newPageNum;
+      this.#updatePageMeter();
+      this.#renderStripWindow();
+    }
+  }
+
+  /** CWA: attaches images near the current page and detaches the others (strip modes). */
+  #renderStripWindow() {
+    const numPages = this.#currentBook.getNumberOfPages();
+    const containers = this.#pageContainers.filter(c => c.isShown());
+    for (let i = 0; i < containers.length && i < numPages; ++i) {
+      if (Math.abs(i - this.#currentPageNum) <= STRIP_RENDER_WINDOW) {
+        if (containers[i].getRenderedPageNum() !== i) {
+          this.#renderPageInContainer(i, containers[i]);
+        }
+      } else {
+        containers[i].unloadImage(i);
+      }
+    }
   }
 
   handleSwipeEvent(evt) {
@@ -100,18 +165,7 @@ export class BookViewer {
     // If a swipe/scroll event occurs, let it happen normally, but update the page
     // number, if required.
     if (this.getNumPagesInViewer() >= 3) {
-      const pageSetter = this.getNumPagesInViewer() === 3 ?
-          this.#longStripPageSetter :
-          this.#wideStripPageSetter;
-      const pageBoxes = this.#pageContainers.filter(c => c.isShown()).map(c => c.getBox());
-      const newPageNum = Math.floor(pageSetter.getScrollPosition(
-          document.documentElement.scrollLeft,
-          document.documentElement.scrollTop,
-          pageBoxes,
-          this.#rotateTimes));
-      if (newPageNum != this.#currentPageNum) {
-        this.#currentPageNum = newPageNum;
-      }
+      this.#syncStripScroll();
       return;
     }
 
@@ -239,6 +293,7 @@ export class BookViewer {
 
     if (this.#numPagesInViewer !== numPages) {
       this.#numPagesInViewer = numPages;
+      this.#stripScrollRequested = true;
       this.updateLayout();
     }
   }
@@ -284,7 +339,10 @@ export class BookViewer {
     const layoutParams = {
       fitMode: this.#fitMode,
       rotateTimes: this.#rotateTimes,
-      pageAspectRatio: currentPage.getAspectRatio(),
+      // CWA: strip modes size every page alike; use the first page so boxes do not jump while
+      // the current page changes during scrolling.
+      pageAspectRatio: (this.#numPagesInViewer >= 3 && this.#currentBook.getPage(0) ?
+          this.#currentBook.getPage(0) : currentPage).getAspectRatio(),
       bv: {...bv},
     };
 
@@ -331,14 +389,20 @@ export class BookViewer {
     pageSetting = pageSetter.updateLayout(layoutParams);
 
     // For every visible PageContainer, set its box size and render the page.
+    const isStrip = this.#numPagesInViewer >= 3;
     const pageContainers = this.#showPageContainers(numPages);
     for (let i = 0; i < numPages; ++i) {
       pageContainers[i].setFrame(pageSetting.boxes[i]);
-      this.#renderPageInContainer(startingPageNum, pageContainers[i]);
+      if (!isStrip) {
+        this.#renderPageInContainer(startingPageNum, pageContainers[i]);
+      }
 
       ++startingPageNum;
       // The 2-page page setter will render the first page in its second container at the end.
       if (startingPageNum >= this.#currentBook.getNumberOfPages()) startingPageNum = 0;
+    }
+    if (isStrip) {
+      this.#renderStripWindow();
     }
 
     const tx = pageSetting.bv.left;
@@ -376,22 +440,31 @@ export class BookViewer {
       }
 
       // If the user moved pages, and that page is not visible, scroll them to it.
+      // CWA: only when navigation asked for it; layouts triggered by resizes (e.g. the iOS toolbar
+      // collapsing while scrolling) must not yank the user back to a stale page.
       const oldPageNum = Math.floor(prevScrollPos);
-      if (oldPageNum !== this.#currentPageNum) {
-        const pxPageHeight = pageSetting.boxes[0].height;
+      if (this.#stripScrollRequested && oldPageNum !== this.#currentPageNum) {
+        const isWide = this.getNumPagesInViewer() === 4;
+        const pxPageHeight = isWide ? pageSetting.boxes[0].width : pageSetting.boxes[0].height;
         const pxDeltaToTopOfOldPage = -(prevScrollPos - oldPageNum) * pxPageHeight;
         const pxTotalDelta = pxDeltaToTopOfOldPage + (this.#currentPageNum - oldPageNum) * pxPageHeight;
         let left = 0;
         let top = 0;
+        // CWA: wide-strip pages advance horizontally (see WideStripPageSetter.getScrollPosition).
         switch (this.#rotateTimes) {
-          case 0: top = pxTotalDelta; break;
-          case 1: left = -pxTotalDelta; break;
-          case 2: top = -pxTotalDelta; break;
-          case 3: left = pxTotalDelta; break;
+          case 0: if (isWide) left = pxTotalDelta; else top = pxTotalDelta; break;
+          case 1: if (isWide) top = pxTotalDelta; else left = -pxTotalDelta; break;
+          case 2: if (isWide) left = -pxTotalDelta; else top = -pxTotalDelta; break;
+          case 3: if (isWide) top = -pxTotalDelta; else left = pxTotalDelta; break;
         }
-        document.documentElement.scrollBy({ left, top, behavior: 'smooth' });
+        // CWA: jump instantly over long distances so intermediate pages are not all fetched.
+        const behavior = Math.abs(this.#currentPageNum - oldPageNum) > 1 ? 'auto' : 'smooth';
+        document.documentElement.scrollBy({ left, top, behavior });
+      } else if (!this.#stripScrollRequested) {
+        this.#syncStripScroll();
       }
     }
+    this.#stripScrollRequested = false;
   }
 
   /**
@@ -472,6 +545,7 @@ export class BookViewer {
     }
 
     this.#currentPageNum--;
+    this.#stripScrollRequested = true;
     this.updateLayout();
     return true;
   }
@@ -485,6 +559,7 @@ export class BookViewer {
     }
 
     this.#currentPageNum++;
+    this.#stripScrollRequested = true;
     this.updateLayout();
     return true;
   }
@@ -496,6 +571,7 @@ export class BookViewer {
       return;
     }
     this.#currentPageNum = n;
+    this.#stripScrollRequested = true;
     this.updateLayout();
   }
 
@@ -641,6 +717,7 @@ export class BookViewer {
       const totalPages = this.#currentBook.getNumberOfPages();
       const page = Math.max(1, Math.ceil(((evt.clientX - l) / pdiv.offsetWidth) * totalPages)) - 1;
       this.#currentPageNum = page;
+      this.#stripScrollRequested = true;
       this.updateLayout();
     });
   }
@@ -682,7 +759,10 @@ export class BookViewer {
     assert(n > 0);
     const N = Math.max(this.#pageContainers.length, n);
     for (let i = 0; i < N; ++i) {
-      this.#getPageContainer(i).show(i < n);
+      const container = this.#getPageContainer(i);
+      container.show(i < n);
+      // CWA: release images held by containers hidden after leaving a strip mode.
+      if (i >= n) container.unloadImage(i);
     }
     return this.#pageContainers.slice(0, n);
   }
@@ -694,6 +774,13 @@ export class BookViewer {
     getElem('page').innerHTML = (pageNum + 1) + '/' + numPages;
     getElem('pagemeter').setAttribute('width',
       100 * (numPages == 0 ? 0 : ((pageNum + this.#numPagesInViewer) / numPages)) + '%');
+    // CWA: let the host page know (bookmarks, prefetching).
+    if (pageNum !== this.lastNotifiedPageNum_ && numPages > 0) {
+      this.lastNotifiedPageNum_ = pageNum;
+      window.dispatchEvent(new CustomEvent('kthoom-pagechange', {
+        detail: { pageNum, numPages, numPagesInViewer: this.#numPagesInViewer },
+      }));
+    }
   }
 
   /** @private */

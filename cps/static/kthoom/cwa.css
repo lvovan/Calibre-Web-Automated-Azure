@@ -1,0 +1,28 @@
+/* Calibre-Web Automated overrides for kthoom (loaded after kthoom.css). */
+
+/* One book per page: no reading stack, previous/next book or download. */
+#readingStack,
+#readingStackOverlay,
+#prevBook,
+#nextBook,
+#menu-download {
+  display: none !important;
+}
+
+#cwaClose {
+  align-items: center;
+  border-style: outset;
+  border-width: 2px;
+  box-sizing: border-box;
+  display: inline-flex;
+  justify-content: center;
+  text-decoration: none;
+  vertical-align: top;
+}
+
+#cwaClose:hover,
+#cwaClose:focus {
+  background-color: #444;
+  border-color: yellow;
+  color: yellow;
+}

@@ -108,7 +108,11 @@ export class ImagePage extends Page {
 
   /** @returns {string} */
   getURI() {
-    return createURLFromArray(this.bytes, this.getMimeType());
+    // CWA: upstream created (and never revoked) a new object URL on every render.
+    if (!this.uri_) {
+      this.uri_ = createURLFromArray(this.bytes, this.getMimeType());
+    }
+    return this.uri_;
   }
 
   /**
@@ -118,6 +122,45 @@ export class ImagePage extends Page {
    */
   renderIntoContainer(pageContainer, pageNum) {
     pageContainer.renderRasterImage(this.getURI(), pageNum);
+  }
+}
+
+/**
+ * CWA: an image page served by the CWA server one page at a time. Its bytes are never held in
+ * JavaScript; the browser fetches (and caches) the image only when it is rendered.
+ */
+export class RemoteImagePage extends ImagePage {
+  /**
+   * @param {string} name
+   * @param {string} mimeType
+   * @param {string} url
+   * @param {number=} width Natural width, if the server knows it.
+   * @param {number=} height Natural height, if the server knows it.
+   */
+  constructor(name, mimeType, url, width, height) {
+    const known = width > 0 && height > 0;
+    super(name, mimeType, known ? width / height : DEFAULT_ASPECT_RATIO, new Uint8Array(0));
+    this.uri_ = url;
+    /** @private {boolean} */
+    this.aspectKnown_ = known;
+  }
+
+  getURI() { return this.uri_; }
+
+  renderIntoContainer(pageContainer, pageNum) {
+    pageContainer.renderRasterImage(this.uri_, pageNum);
+    if (!this.aspectKnown_) {
+      // Learn the real aspect ratio from the image, then ask the viewer to lay out again.
+      this.aspectKnown_ = true;
+      const img = new Image();
+      img.onload = () => {
+        if (img.naturalWidth && img.naturalHeight) {
+          this.aspectRatio_ = img.naturalWidth / img.naturalHeight;
+          window.dispatchEvent(new CustomEvent('kthoom-pageaspect', { detail: { pageNum } }));
+        }
+      };
+      img.src = this.uri_;
+    }
   }
 }
 

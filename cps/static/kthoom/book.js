@@ -5,7 +5,7 @@
  *
  * Copyright(c) 2018 Google Inc.
  */
-import { BookBinder, createBookBinderAsync } from './book-binder.js';
+import { BookBinder, BookType, createBookBinderAsync } from './book-binder.js';
 import { BookEventType, BookLoadingStartedEvent, BookLoadingCompleteEvent,
          BookProgressEvent, 
          BookPageExtractedEvent,
@@ -133,6 +133,12 @@ export class Book extends EventTarget {
   #totalPages = 0;
 
   /**
+   * CWA: pages served one by one by the server (see loadFromPageList()).
+   * @type {Array<Page>|null}
+   */
+  #pageList = null;
+
+  /**
    * Construct a book (but do not load it yet).
    * @param {string} name The human-readable name of the book (appears in the Reading Stack).
    * @param {string|File|FileSystemFileHandle|Request} uriRequestOrFileHandle For files loaded via
@@ -213,14 +219,17 @@ export class Book extends EventTarget {
 
   getName() { return this.#name; }
   getLoadingPercentage() {
+    if (this.#pageList) return this.#finishedLoading ? 1 : 0;
     if (!this.#bookBinder) return 0;
     return this.#bookBinder.getLoadingPercentage();
   }
   getUnarchivingPercentage() {
+    if (this.#pageList) return this.#finishedLoading ? 1 : 0;
     if (!this.#bookBinder) return 0;
     return this.#bookBinder.getUnarchivingPercentage();
   }
   getLayoutPercentage() {
+    if (this.#pageList) return this.#finishedBinding ? 1 : 0;
     if (!this.#bookBinder) return 0;
     return this.#bookBinder.getLayoutPercentage();
   }
@@ -272,6 +281,9 @@ export class Book extends EventTarget {
    * @returns {Promise<Book>}
    */
   async load() {
+    if (this.#pageList) {
+      return this.loadFromPageList();
+    }
     if (this.#request) {
       return this.loadFromFetch();
     } else if (this.#uri) {
@@ -524,6 +536,49 @@ export class Book extends EventTarget {
       bookPump.addEventListener(BookPumpEventType.BOOKPUMP_DATA_RECEIVED, handleBookPumpEvents);
       bookPump.addEventListener(BookPumpEventType.BOOKPUMP_END, handleBookPumpEvents);
     });
+  }
+
+  /**
+   * CWA: sets the pages of a book that is served page by page. Call before load().
+   * @param {Array<Page>} pages
+   */
+  setPageList(pages) {
+    if (!this.#needsLoading) {
+      throw 'Cannot set the page list when the Book is already loading or loaded';
+    }
+    this.#pageList = pages;
+  }
+
+  /**
+   * CWA: "loads" a book whose pages are fetched lazily by the browser when rendered. No archive
+   * bytes are downloaded or unpacked here, so memory use does not grow with the book size.
+   * @returns {Promise<Book>}
+   */
+  async loadFromPageList() {
+    if (!this.#needsLoading) {
+      throw 'Cannot try to load via a page list when the Book is already loading or loaded';
+    }
+    if (!this.#pageList) {
+      throw 'Page list for book was not set in loadFromPageList()';
+    }
+
+    this.#needsLoading = false;
+    this.#bookMetadata = createEmptyMetadata(BookType.COMIC);
+    this.dispatchEvent(new BookLoadingStartedEvent(this));
+    // Let the reading stack and viewer subscribe to this book before pages arrive.
+    await Promise.resolve();
+
+    this.#totalPages = this.#pageList.length;
+    this.#finishedLoading = true;
+    this.dispatchEvent(new BookProgressEvent(this, this.#totalPages));
+    this.#pageList.forEach((page, i) => {
+      this.#pages.push(page);
+      this.dispatchEvent(new BookPageExtractedEvent(this, page, i + 1));
+    });
+    this.dispatchEvent(new BookLoadingCompleteEvent(this));
+    this.#finishedBinding = true;
+    this.dispatchEvent(new BookBindingCompleteEvent(this));
+    return this;
   }
 
   /** @returns {boolean} True if this book has not started loading, false otherwise. */

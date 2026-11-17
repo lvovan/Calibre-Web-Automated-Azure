@@ -64,7 +64,8 @@ export class MetadataViewer {
 
   /** Load the code for MetadataEditor and show it. */
   doEdit() {
-    if (this.editor_) {
+    // CWA: books served page by page have no archive to rewrite.
+    if (this.editor_ || !this.book_ || !this.book_.getArrayBuffer()) {
       return;
     }
 

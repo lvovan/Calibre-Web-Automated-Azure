@@ -151,7 +151,8 @@ if [ -n "$INGEST_DIR" ]; then
   mkdir -p "$INGEST_DIR" 2>/dev/null || true
   # Set ownership unless network share mode (only skip for /cwa-book-ingest)
   if [ "${NETWORK_SHARE_MODE,,}" = "true" ] || [ "${NETWORK_SHARE_MODE}" = "1" ] || [ "${NETWORK_SHARE_MODE,,}" = "yes" ] || [ "${NETWORK_SHARE_MODE,,}" = "on" ]; then
-    if [ "$INGEST_DIR" = "/cwa-book-ingest" ] && is_mount "$INGEST_DIR"; then
+    # Docker anonymous volumes are mounts too; only skip chown on real network shares
+    if [ "$INGEST_DIR" = "/cwa-book-ingest" ] && is_network_mount "$INGEST_DIR"; then
       echo "[cwa-init] NETWORK_SHARE_MODE=true detected; skipping chown of $INGEST_DIR"
     else
       chown -R abc:abc "$INGEST_DIR" 2>/dev/null || true
@@ -318,7 +319,7 @@ for d in "${requiredDirs[@]}"; do
   if [ "${NETWORK_SHARE_MODE,,}" = "true" ] || [ "${NETWORK_SHARE_MODE}" = "1" ] || [ "${NETWORK_SHARE_MODE,,}" = "yes" ] || [ "${NETWORK_SHARE_MODE,,}" = "on" ]; then
     case "$d" in
       /cwa-book-ingest|/cwa-book-ingest/*)
-        if ! is_mount /cwa-book-ingest; then
+        if ! is_network_mount /cwa-book-ingest; then
           chown -R abc:abc "$d"
           continue
         fi

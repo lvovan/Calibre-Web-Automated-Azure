@@ -48,7 +48,9 @@ jobs:
         id: meta
         run: |
           repo="ghcr.io/${GITHUB_REPOSITORY,,}"
-          base_version="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"
+          # The fork has no tags of its own: base the version on the newest upstream release it contains
+          git fetch --quiet --no-tags https://github.com/crocodilestick/Calibre-Web-Automated.git '+refs/tags/v*:refs/tags/v*' || true
+          base_version="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0.0)"
           echo "repo=${repo}" >> "$GITHUB_OUTPUT"
           echo "image=${repo}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "version=${base_version}-azure.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
@@ -84,15 +86,19 @@ jobs:
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
         run: |
-          docker run -d --name cwa -p 8083:8083 "$IMAGE"
+          docker run -d --name cwa -p 8083:8083 -e NETWORK_SHARE_MODE=true "$IMAGE"
           ok=0
           for i in $(seq 1 60); do
             if curl -fsS -o /dev/null http://localhost:8083/health; then ok=1; break; fi
             sleep 5
           done
+          # Web uploads run as abc and write to the ingest dir (an anonymous Docker volume)
+          writable=0
+          docker exec cwa s6-setuidgid abc sh -c 'touch /cwa-book-ingest/.w && rm /cwa-book-ingest/.w' && writable=1
           docker logs cwa 2>&1 | tail -n 60
           docker rm -f cwa > /dev/null
           if [ "$ok" != 1 ]; then echo "::error::Image did not become healthy within 5 minutes"; exit 1; fi
+          if [ "$writable" != 1 ]; then echo "::error::/cwa-book-ingest is not writable by abc"; exit 1; fi
 
   deploy:
     needs: build

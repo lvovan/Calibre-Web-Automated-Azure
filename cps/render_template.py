@@ -150,7 +150,8 @@ def cwa_update_available() -> tuple[bool, str, str]:
         tag_name = constants.STABLE_VERSION
 
         def _normalize_version(value: str) -> str:
-            return (value or "").lstrip("vV")
+            # Azure fork builds are "<upstream tag>-azure.<sha>"; compare on the upstream tag
+            return (value or "").strip().lstrip("vV").split("-azure.", 1)[0]
 
         current_normalized = _normalize_version(current_version)
         tag_normalized = _normalize_version(tag_name)

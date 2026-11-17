@@ -96,6 +96,8 @@ GitHub configuration used by the workflow:
 | Variable | `CONTENT_STORAGE_ACCOUNT_NAME` | Alternative: external content account name |
 | Variable | `LIBRARY_SHARE_NAME` | Default `library` |
 | Variable | `CUSTOM_DOMAIN_NAME` | Leave unset until DNS is ready (step 4) |
+| Variable | `ONEDRIVE_CLIENT_ID` | Optional, set by bootstrap: enables *Import from OneDrive* (step 5) |
+| Secret | `ONEDRIVE_CLIENT_SECRET` | Optional, set by bootstrap: client secret of the OneDrive app registration |
 
 The content storage can be configured after the first deployment. Until it is set, the library mount is omitted, the workflow skips the health check with a warning, and the container refuses to start (`/calibre-library is not a mount` in the log stream). Configure it in GitHub, not in the portal's *Path mappings*: every deployment overwrites the portal settings.
 
@@ -142,6 +144,24 @@ Setting `CUSTOM_DOMAIN_NAME` also sets `CWA_ALLOWED_HOSTS`, which makes the app 
 - The check uses the raw `Host` header, which the App Service front end routes on. A client-supplied `X-Forwarded-Host` can't bypass it.
 - Kudu (`*.scm.azurewebsites.net`) is a separate site, protected by Entra ID, and isn't affected.
 - `CUSTOM_DOMAIN_NAME` sets `CWA_ALLOWED_HOSTS` to that single domain. You can set a comma-separated list on the app instead, but each deployment resets it to `CUSTOM_DOMAIN_NAME`.
+
+## 5. Import from OneDrive (optional)
+
+Users with the *Upload* permission get a ☁️ button next to **Upload**. It opens a page where they connect their personal OneDrive (Microsoft consumer account, read-only), browse it, and import:
+- **Selected files**: only formats this server accepts for upload; other files are greyed out.
+- **Selected folders**: every `.epub` file found recursively; other file types are ignored.
+- **Duplicates**: files with the same content (OneDrive hash) are imported once. Books already imported from OneDrive, or already in the library (title/author match, regardless of the *automerge* setting), are skipped.
+
+Imports run in a persistent queue (app.db), two at a time, downloading one file at a time into the ingest folder. They survive restarts and appear on the **Tasks** page and under *Your imports* on the OneDrive page, where they can be cancelled. The connection is kept: the refresh token is stored encrypted in app.db until the user clicks **Disconnect**.
+
+The feature needs `CUSTOM_DOMAIN_NAME` (the OAuth redirect URI is `https://<CUSTOM_DOMAIN_NAME>/onedrive/callback`) and an Entra app registration:
+
+- **Automatic**: re-run the bootstrap with `-CustomDomainName books.example.com -SetGitHubConfig` (bash: `CUSTOM_DOMAIN_NAME=… SET_GITHUB_CONFIG=true`). It creates the app `cwa-onedrive` (personal Microsoft accounts only, Graph delegated `Files.Read`, `User.Read`, `offline_access`) and a 2-year client secret, and sets `ONEDRIVE_CLIENT_ID` / `ONEDRIVE_CLIENT_SECRET`. Then re-run the workflow.
+- **Manual** (if your tenant blocks app creation, the bootstrap prints these steps): in any Entra tenant, *App registrations → New registration*, *Personal Microsoft accounts only*, redirect URI *Web* `https://<domain>/onedrive/callback`; add the three delegated Graph permissions; create a client secret; set the GitHub variable and secret above.
+
+No admin consent is needed: each user consents when connecting. The settings are only applied when the client ID, the secret and `CUSTOM_DOMAIN_NAME` are all set; otherwise the button is hidden.
+
+**Rotating the secret** (it expires after 2 years): re-run the bootstrap with `-RotateOneDriveSecret` (bash: `ROTATE_ONEDRIVE_SECRET=true`), re-run the workflow, then delete the old secret in the app registration. Users stay connected.
 
 ## Cost (France Central, approximate)
 

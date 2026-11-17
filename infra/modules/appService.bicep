@@ -41,6 +41,13 @@ param hardcoverToken string = ''
 @description('Custom domain. When set, requests on any other host (e.g. *.azurewebsites.net) get a 404, except /health.')
 param customDomainName string = ''
 
+@description('OneDrive import app registration client ID. The feature is enabled only together with the secret and a custom domain.')
+param oneDriveClientId string = ''
+
+@description('OneDrive import app registration client secret.')
+@secure()
+param oneDriveClientSecret string = ''
+
 param tags object = {}
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
@@ -80,12 +87,19 @@ var baseAppSettings = [
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
 ]
 
+var oneDriveEnabled = !empty(oneDriveClientId) && !empty(oneDriveClientSecret) && !empty(customDomainName)
+
 var optionalAppSettings = concat(empty(hardcoverToken) ? [] : [
   { name: 'HARDCOVER_TOKEN', value: hardcoverToken }
 ], empty(customDomainName) ? [] : [
   // Blocks the default *.azurewebsites.net hostname (cps/host_allowlist.py)
   { name: 'CWA_ALLOWED_HOSTS', value: customDomainName }
-])
+], oneDriveEnabled ? [
+  // Import from OneDrive (cps/onedrive.py); the redirect URI must match the app registration
+  { name: 'ONEDRIVE_CLIENT_ID', value: oneDriveClientId }
+  { name: 'ONEDRIVE_CLIENT_SECRET', value: oneDriveClientSecret }
+  { name: 'ONEDRIVE_REDIRECT_URI', value: 'https://${customDomainName}/onedrive/callback' }
+] : [])
 
 // Omitted until the external content storage is configured
 var libraryMount = empty(contentStorageAccountName) ? {} : {

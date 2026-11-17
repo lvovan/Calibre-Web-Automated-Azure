@@ -108,6 +108,43 @@ def test_failed_import_does_not_mark_batch_dirty(monkeypatch, tmp_path):
     backup_mock.assert_called_once()
 
 
+@pytest.mark.parametrize("filename, merged", [("onedrive_5_1_book.epub", False), ("new_5_1_book.epub", True)])
+def test_onedrive_files_are_never_merged_into_existing_books(monkeypatch, tmp_path, filename, merged):
+    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    monkeypatch.syspath_prepend(str(scripts_dir))
+    monkeypatch.setenv("CWA_INGEST_BATCH_DIRTY_FILE", str(tmp_path / "batch_dirty"))
+
+    import ingest_processor
+
+    outcomes = tmp_path / "outcomes"
+    monkeypatch.setattr(ingest_processor, "INGEST_OUTCOME_DIR", str(outcomes))
+    source = tmp_path / "source.epub"
+    source.write_bytes(b"book")
+    processor = build_processor(ingest_processor, tmp_path)
+    processor.filename = filename
+
+    result = subprocess.CompletedProcess(
+        args=["calibredb"], returncode=0, stdout="",
+        stderr="The following books were not added as they already exist in the database",
+    )
+    with mock.patch.object(ingest_processor.subprocess, "run", return_value=result) as run_mock, \
+        mock.patch.object(ingest_processor, "gdrive_sync_if_enabled"), \
+        mock.patch.object(processor, "_fallback_last_added_book_id"), \
+        mock.patch.object(processor, "fetch_metadata_if_enabled"), \
+        mock.patch.object(processor, "trigger_auto_send_if_enabled"), \
+        mock.patch.object(processor, "generate_book_checksums"):
+        processor.add_book_to_library(str(source))
+
+    assert ("--automerge" in run_mock.call_args.args[0]) is merged
+    marker = outcomes / filename
+    if merged:
+        assert not marker.exists()
+    else:
+        assert marker.read_text() == "existing"
+        assert processor.db.entries == []
+    assert not list(Path(processor.staging_dir).iterdir())
+
+
 def test_successful_add_format_marks_batch_dirty(monkeypatch, tmp_path):
     scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
     monkeypatch.syspath_prepend(str(scripts_dir))

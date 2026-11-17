@@ -6,7 +6,8 @@
 #   GITHUB_REPO=owner/repo [RESOURCE_GROUP=rg-cwa] [LOCATION=francecentral] [BRANCH=main] \
 #   [APP_REGISTRATION_NAME=github-cwa-deploy] [SUBSCRIPTION_ID=...] \
 #   [CONTENT_STORAGE_ACCOUNT_NAME=... CONTENT_STORAGE_RESOURCE_GROUP=...] [LIBRARY_SHARE_NAME=library] \
-#   [CUSTOM_DOMAIN_NAME=books.example.com] [SET_GITHUB_CONFIG=true] ./infra/bootstrap.sh
+#   [CUSTOM_DOMAIN_NAME=books.example.com] [ONEDRIVE_APP_NAME=cwa-onedrive] [SKIP_ONEDRIVE=true] \
+#   [ROTATE_ONEDRIVE_SECRET=true] [SET_GITHUB_CONFIG=true] ./infra/bootstrap.sh
 set -euo pipefail
 
 : "${GITHUB_REPO:?Set GITHUB_REPO=owner/repo}"
@@ -16,6 +17,9 @@ BRANCH="${BRANCH:-main}"
 APP_REGISTRATION_NAME="${APP_REGISTRATION_NAME:-github-cwa-deploy}"
 LIBRARY_SHARE_NAME="${LIBRARY_SHARE_NAME:-library}"
 CUSTOM_DOMAIN_NAME="${CUSTOM_DOMAIN_NAME:-}"
+ONEDRIVE_APP_NAME="${ONEDRIVE_APP_NAME:-cwa-onedrive}"
+SKIP_ONEDRIVE="${SKIP_ONEDRIVE:-false}"
+ROTATE_ONEDRIVE_SECRET="${ROTATE_ONEDRIVE_SECRET:-false}"
 CONTENT_STORAGE_ACCOUNT_NAME="${CONTENT_STORAGE_ACCOUNT_NAME:-}"
 CONTENT_STORAGE_RESOURCE_GROUP="${CONTENT_STORAGE_RESOURCE_GROUP:-}"
 SET_GITHUB_CONFIG="${SET_GITHUB_CONFIG:-false}"
@@ -80,6 +84,67 @@ if [ -n "$CONTENT_STORAGE_ACCOUNT_NAME" ] && [ -n "$CONTENT_STORAGE_RESOURCE_GRO
   CONTENT_KEY="$(az storage account keys list -n "$CONTENT_STORAGE_ACCOUNT_NAME" -g "$CONTENT_STORAGE_RESOURCE_GROUP" --query '[0].value' -o tsv)"
 fi
 
+# Import from OneDrive: app registration for personal Microsoft accounts (needs CUSTOM_DOMAIN_NAME)
+ONEDRIVE_CLIENT_ID=""
+ONEDRIVE_SECRET=""
+setup_onedrive_app() {
+  local redirect="https://${CUSTOM_DOMAIN_NAME}/onedrive/callback"
+  local access='[{"resourceAppId":"00000003-0000-0000-c000-000000000000","resourceAccess":[
+    {"id":"df85f4d6-205c-4ac5-a5ea-6bf408dba283","type":"Scope"},
+    {"id":"e1fe6dd8-ba31-4d61-89e7-88639da4683d","type":"Scope"},
+    {"id":"7427e0e9-2fba-42fe-b0c0-848c9e6a8182","type":"Scope"}]}]'
+  local object_id is_new=false
+  echo "OneDrive app registration $ONEDRIVE_APP_NAME..."
+  ONEDRIVE_CLIENT_ID="$(az ad app list --display-name "$ONEDRIVE_APP_NAME" --query '[0].appId' -o tsv)" || return 1
+  if [ -z "$ONEDRIVE_CLIENT_ID" ]; then
+    is_new=true
+    ONEDRIVE_CLIENT_ID="$(az rest --method POST --uri https://graph.microsoft.com/v1.0/applications \
+      --headers Content-Type=application/json --query appId -o tsv --body "{
+        \"displayName\": \"$ONEDRIVE_APP_NAME\",
+        \"signInAudience\": \"PersonalMicrosoftAccount\",
+        \"api\": {\"requestedAccessTokenVersion\": 2},
+        \"web\": {\"redirectUris\": [\"$redirect\"]},
+        \"requiredResourceAccess\": $access
+      }")" || return 1
+  else
+    object_id="$(az ad app list --display-name "$ONEDRIVE_APP_NAME" --query '[0].id' -o tsv)" || return 1
+    local uris
+    uris="$(az ad app show --id "$object_id" --query web.redirectUris -o json \
+      | jq -c --arg r "$redirect" '. + [$r] | unique')" || return 1
+    az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/$object_id" \
+      --headers Content-Type=application/json \
+      --body "{\"web\": {\"redirectUris\": $uris}, \"requiredResourceAccess\": $access}" -o none || return 1
+  fi
+  if [ "$is_new" = true ] || [ "$ROTATE_ONEDRIVE_SECRET" = "true" ]; then
+    for i in 1 2 3 4 5 6; do # a just-created app can take a few seconds to replicate
+      ONEDRIVE_SECRET="$(az ad app credential reset --id "$ONEDRIVE_CLIENT_ID" --append \
+        --display-name cwa-onedrive --years 2 --query password -o tsv 2>/dev/null || true)"
+      [ -n "$ONEDRIVE_SECRET" ] && break
+      sleep 10
+    done
+    [ -n "$ONEDRIVE_SECRET" ] || return 1
+    echo "OneDrive client secret created (expires in 2 years; rotate with ROTATE_ONEDRIVE_SECRET=true)."
+  else
+    echo "OneDrive app exists; keeping its current secret (set ROTATE_ONEDRIVE_SECRET=true for a new one)."
+  fi
+}
+if [ -n "$CUSTOM_DOMAIN_NAME" ] && [ "$SKIP_ONEDRIVE" != "true" ]; then
+  if ! setup_onedrive_app; then
+    ONEDRIVE_CLIENT_ID=""
+    ONEDRIVE_SECRET=""
+    cat >&2 <<EOF
+WARNING: could not create the OneDrive app registration. Your tenant may block it; create it manually:
+  1. Entra admin center > App registrations > New registration
+     Name: $ONEDRIVE_APP_NAME
+     Supported account types: Personal Microsoft accounts only
+     Redirect URI: Web, https://${CUSTOM_DOMAIN_NAME}/onedrive/callback
+  2. API permissions > Add > Microsoft Graph > Delegated: Files.Read, User.Read, offline_access
+  3. Certificates & secrets > New client secret
+  4. Set GitHub variable ONEDRIVE_CLIENT_ID (Application ID) and secret ONEDRIVE_CLIENT_SECRET, then redeploy.
+EOF
+  fi
+fi
+
 if [ "$SET_GITHUB_CONFIG" = "true" ]; then
   command -v gh >/dev/null || { echo "GitHub CLI (gh) not found." >&2; exit 1; }
   gh secret set AZURE_CLIENT_ID --repo "$GITHUB_REPO" --body "$APP_ID"
@@ -90,6 +155,8 @@ if [ "$SET_GITHUB_CONFIG" = "true" ]; then
   gh variable set LIBRARY_SHARE_NAME --repo "$GITHUB_REPO" --body "$LIBRARY_SHARE_NAME"
   [ -n "$CONTENT_STORAGE_ACCOUNT_NAME" ] && gh variable set CONTENT_STORAGE_ACCOUNT_NAME --repo "$GITHUB_REPO" --body "$CONTENT_STORAGE_ACCOUNT_NAME"
   [ -n "$CUSTOM_DOMAIN_NAME" ] && gh variable set CUSTOM_DOMAIN_NAME --repo "$GITHUB_REPO" --body "$CUSTOM_DOMAIN_NAME"
+  [ -n "$ONEDRIVE_CLIENT_ID" ] && gh variable set ONEDRIVE_CLIENT_ID --repo "$GITHUB_REPO" --body "$ONEDRIVE_CLIENT_ID"
+  [ -n "$ONEDRIVE_SECRET" ] && printf '%s' "$ONEDRIVE_SECRET" | gh secret set ONEDRIVE_CLIENT_SECRET --repo "$GITHUB_REPO"
   echo "GitHub secrets and variables set on $GITHUB_REPO."
   [ -z "$CONTENT_KEY" ] && echo "WARNING: content storage not configured. Set the CONTENT_STORAGE_CONNECTION_STRING secret, then redeploy." >&2
 else
@@ -101,12 +168,14 @@ Set these GitHub repository SECRETS:
   AZURE_SUBSCRIPTION_ID = $SUBSCRIPTION_ID
   CONTENT_STORAGE_ACCOUNT_KEY = <key of the content storage account>
   HARDCOVER_TOKEN = <optional>
+  ONEDRIVE_CLIENT_SECRET = ${ONEDRIVE_SECRET:-<unchanged / not configured>}
 
 Set these GitHub repository VARIABLES:
   AZURE_RESOURCE_GROUP = $RESOURCE_GROUP
   CONTENT_STORAGE_ACCOUNT_NAME = $CONTENT_STORAGE_ACCOUNT_NAME
   LIBRARY_SHARE_NAME = $LIBRARY_SHARE_NAME
   CUSTOM_DOMAIN_NAME = $CUSTOM_DOMAIN_NAME
+  ONEDRIVE_CLIENT_ID = $ONEDRIVE_CLIENT_ID
 EOF
 fi
 echo

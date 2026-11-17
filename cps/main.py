@@ -34,6 +34,7 @@ def main():
     from .remotelogin import remotelogin
     from .progress_syncing.protocols.kosync import kosync
     from .duplicates import duplicates
+    from .onedrive import onedrive, start_queue as start_onedrive_queue
     try:
         from .kobo import kobo, get_kobo_activated
         from .kobo_auth import kobo_auth
@@ -83,6 +84,7 @@ def main():
     app.register_blueprint(editbook)
     app.register_blueprint(kosync)
     app.register_blueprint(duplicates)
+    app.register_blueprint(onedrive)
     if kobo_available:
         app.register_blueprint(kobo)
         app.register_blueprint(kobo_auth)
@@ -91,5 +93,6 @@ def main():
         app.register_blueprint(readingservices_userstorage)
     if oauth_available:
         app.register_blueprint(oauth)
+    start_onedrive_queue()
     success = web_server.start()
     sys.exit(0 if success else 1)

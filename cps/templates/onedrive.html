@@ -1,0 +1,107 @@
+{% extends "layout.html" %}
+{% block header %}
+<link href="{{ url_for('static', filename='css/onedrive.css') }}" rel="stylesheet">
+{% endblock %}
+{% block body %}
+<div class="discover onedrive-import" id="onedrive-import"
+     data-children-url="{{ url_for('onedrive.api_children') }}"
+     data-import-url="{{ url_for('onedrive.api_import') }}"
+     data-jobs-url="{{ url_for('onedrive.api_jobs') }}"
+     data-cancel-url="{{ url_for('onedrive.api_cancel', job_id=0) }}"
+     data-connect-url="{{ url_for('onedrive.connect') }}"
+     data-tasks-url="{{ url_for('tasks.get_tasks_status') }}"
+     data-connected="{{ 'true' if connection else 'false' }}">
+  <h2>&#9729;&#65039; {{ _('Import from OneDrive') }}</h2>
+
+  {% if not connection %}
+  <div class="od-connect">
+    <p>{{ _('Connect your personal OneDrive (Microsoft account) to import books from it. Calibre-Web Automated only gets read access to your files.') }}</p>
+    <a class="btn btn-primary" id="od-connect" href="{{ url_for('onedrive.connect') }}">{{ _('Connect OneDrive') }}</a>
+  </div>
+  {% else %}
+  <div class="od-account">
+    <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
+    {{ _('Connected as') }} <strong>{{ connection.account_name or connection.account_email or _('your Microsoft account') }}</strong>
+    {% if connection.account_email and connection.account_name %}<span class="text-muted">({{ connection.account_email }})</span>{% endif %}
+    <form class="od-disconnect" method="post" action="{{ url_for('onedrive.disconnect') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-default btn-xs" id="od-disconnect">{{ _('Disconnect') }}</button>
+    </form>
+  </div>
+
+  <p class="text-muted od-help">
+    {{ _('Select files or folders to import.') }}
+    {{ _('Files: %(formats)s.', formats=formats|join(', ')) }}
+    {% if folders_allowed %}{{ _('Folders: all .epub files they contain, including subfolders.') }}{% endif %}
+    {{ _('Identical files and books already in your library are skipped.') }}
+  </p>
+
+  <div class="od-browser">
+    <ol class="breadcrumb od-breadcrumb" id="od-breadcrumb"></ol>
+    <div class="od-toolbar">
+      <label class="od-select-all"><input type="checkbox" id="od-select-all"> {{ _('Select all') }}</label>
+      <input type="search" class="form-control input-sm od-filter" id="od-filter" placeholder="{{ _('Filter by name') }}" aria-label="{{ _('Filter by name') }}">
+    </div>
+    <div class="alert alert-danger hidden" id="od-error" role="alert"></div>
+    <ul class="list-group od-list" id="od-list" aria-live="polite"></ul>
+    <div class="od-list-footer">
+      <span class="od-loading hidden" id="od-loading">{{ _('Loading...') }}</span>
+      <button type="button" class="btn btn-default btn-sm hidden" id="od-more">{{ _('Load more') }}</button>
+    </div>
+  </div>
+
+  <div class="od-selection-bar">
+    <span id="od-selection-count"></span>
+    <button type="button" class="btn btn-default btn-sm" id="od-clear" disabled>{{ _('Clear selection') }}</button>
+    <button type="button" class="btn btn-primary" id="od-import" disabled>{{ _('Import') }}</button>
+  </div>
+  <div class="alert alert-success hidden" id="od-import-result" role="status"></div>
+
+  <h3>{{ _('Your imports') }}</h3>
+  <table class="table table-condensed od-jobs" id="od-jobs">
+    <thead>
+      <tr>
+        <th>{{ _('Started') }}</th>
+        <th>{{ _('Selection') }}</th>
+        <th>{{ _('Status') }}</th>
+        <th>{{ _('Imported') }}</th>
+        <th>{{ _('Skipped') }}</th>
+        <th>{{ _('Failed') }}</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <p class="text-muted hidden" id="od-no-jobs">{{ _('No imports yet.') }}</p>
+  {% endif %}
+</div>
+{% endblock %}
+{% block js %}
+{% if connection %}
+<script type="application/json" id="od-strings">{{ {
+  'root': _('My files'),
+  'items': _('%(count)s items', count='{n}'),
+  'item': _('1 item'),
+  'empty': _('This folder is empty.'),
+  'noMatch': _('No items match the filter.'),
+  'unsupported': _('This file format cannot be imported'),
+  'folderNotAllowed': _('Folders can only be imported when EPUB uploads are allowed'),
+  'selected': _('%(files)s file(s), %(folders)s folder(s) selected', files='{files}', folders='{folders}'),
+  'nothingSelected': _('Nothing selected'),
+  'importing': _('Queuing import...'),
+  'queued': _('Import queued. Progress is shown below and on the Tasks page.'),
+  'tasks': _('Open Tasks'),
+  'reconnect': _('Reconnect OneDrive'),
+  'error': _('Something went wrong. Please try again.'),
+  'cancel': _('Cancel'),
+  'status_queued': _('Queued'),
+  'status_scanning': _('Scanning OneDrive...'),
+  'status_running': _('Importing %(processed)s/%(total)s', processed='{processed}', total='{total}'),
+  'status_done': _('Finished'),
+  'status_failed': _('Failed'),
+  'status_cancelled': _('Cancelled'),
+  'more': _('+%(count)s more', count='{n}'),
+} | tojson }}</script>
+<script src="{{ url_for('static', filename='js/onedrive.js') }}"></script>
+{% endif %}
+{% endblock %}

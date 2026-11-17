@@ -43,6 +43,13 @@ param customDomainName string = ''
 @secure()
 param hardcoverToken string = ''
 
+@description('Application (client) ID of the Entra app registration for "Import from OneDrive" (personal Microsoft accounts). Requires customDomainName; leave empty to disable the feature.')
+param oneDriveClientId string = ''
+
+@description('Client secret of the OneDrive app registration.')
+@secure()
+param oneDriveClientSecret string = ''
+
 @description('Log Analytics daily ingestion cap in GB (string to allow decimals).')
 param logDailyQuotaGb string = '0.1'
 
@@ -82,6 +89,8 @@ module appService 'modules/appService.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     hardcoverToken: hardcoverToken
+    oneDriveClientId: oneDriveClientId
+    oneDriveClientSecret: oneDriveClientSecret
     customDomainName: customDomainName
     tags: tags
   }

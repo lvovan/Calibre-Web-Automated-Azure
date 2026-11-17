@@ -787,6 +787,57 @@ class RemoteAuthToken(Base):
         return '<Token %r>' % self.id
 
 
+# OneDrive import (cps/onedrive.py, cps/onedrive_queue.py)
+class OneDriveConnection(Base):
+    __tablename__ = 'onedrive_connection'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('user.id'), unique=True, nullable=False)
+    refresh_token = Column(String, nullable=False)  # Fernet-encrypted
+    account_name = Column(String, default="")
+    account_email = Column(String, default="")
+    connected_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class OneDriveImportJob(Base):
+    __tablename__ = 'onedrive_import_job'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('user.id'), index=True, nullable=False)
+    status = Column(String, default='queued', index=True)  # queued, running, done, failed, cancelled
+    selection = Column(String, nullable=False)  # JSON list of {id, name, folder}
+    enumerated = Column(Boolean, default=False)
+    error = Column(String)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime)
+    finished_at = Column(DateTime)
+
+
+class OneDriveImportItem(Base):
+    __tablename__ = 'onedrive_import_item'
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey('onedrive_import_job.id'), index=True, nullable=False)
+    seq = Column(Integer, nullable=False)
+    drive_item_id = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    size = Column(Integer, default=0)
+    content_hash = Column(String)
+    # pending, ingesting, imported, existing, duplicate, failed, cancelled
+    status = Column(String, default='pending', index=True)
+    ingest_path = Column(String)
+    error = Column(String)
+
+
+class OneDriveImportedHash(Base):
+    """Content hashes of OneDrive files already in the library (skipped before download)."""
+    __tablename__ = 'onedrive_imported_hash'
+
+    content_hash = Column(String, primary_key=True)
+    name = Column(String)
+    imported_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 def filename(context):
     """Generate deterministic filename for thumbnails.
 

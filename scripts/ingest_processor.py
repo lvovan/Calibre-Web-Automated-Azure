@@ -52,6 +52,29 @@ _runtime_init_attempted = False
 _duplicate_scan_timer = None
 _duplicate_scan_lock = threading.Lock()
 
+# Files queued by the OneDrive import (cps/onedrive_queue.py) are never merged into
+# an existing book: calibredb's default duplicate check refuses them, and the
+# outcome is reported back through a marker file named after the ingest file.
+ONEDRIVE_INGEST_PREFIX = "onedrive_"
+INGEST_OUTCOME_DIR = os.environ.get("CWA_INGEST_OUTCOME_DIR", "/config/.cwa_ingest_outcomes")
+
+
+def is_onedrive_ingest_file(filename: str) -> bool:
+    return os.path.basename(filename).startswith(ONEDRIVE_INGEST_PREFIX)
+
+
+def record_ingest_outcome(filename: str, outcome: str) -> None:
+    try:
+        os.makedirs(INGEST_OUTCOME_DIR, exist_ok=True)
+        with open(os.path.join(INGEST_OUTCOME_DIR, os.path.basename(filename)), "w", encoding="utf-8") as f:
+            f.write(outcome)
+    except OSError as e:
+        print(f"[ingest-processor] WARN: Could not record ingest outcome for {filename}: {e}", flush=True)
+
+
+def calibredb_reported_existing(output: str) -> bool:
+    return "already exist" in (output or "").lower()
+
 class ProcessLock:
     """Robust process lock using both file locking and PID tracking"""
 
@@ -904,10 +927,17 @@ class NewBookProcessor:
 
         try:
             if text:
-                result = subprocess.run([
-                    "calibredb", "add", str(staged_path), "--automerge", self.cwa_settings['auto_ingest_automerge'], f"--library-path={self.library_dir}"
-                ], env=self.calibre_env, check=True, capture_output=True, text=True)
-                added_ids = self._parse_added_book_ids((result.stdout or '') + '\n' + (result.stderr or ''))
+                add_command = ["calibredb", "add", str(staged_path), f"--library-path={self.library_dir}"]
+                reject_existing = is_onedrive_ingest_file(getattr(self, "filename", "") or "")
+                if not reject_existing:
+                    add_command[3:3] = ["--automerge", self.cwa_settings['auto_ingest_automerge']]
+                result = subprocess.run(add_command, env=self.calibre_env, check=True, capture_output=True, text=True)
+                output = (result.stdout or '') + '\n' + (result.stderr or '')
+                added_ids = self._parse_added_book_ids(output)
+                if reject_existing and not added_ids and calibredb_reported_existing(output):
+                    print(f"[ingest-processor] {staged_path.stem} is already in the library, not imported", flush=True)
+                    record_ingest_outcome(self.filename, "existing")
+                    return
                 if added_ids:
                     self.last_added_book_ids = added_ids
                     self.last_added_book_id = added_ids[-1]

@@ -2580,6 +2580,13 @@ def _delete_user(content):
             ub.session.query(ub.RemoteAuthToken).filter(ub.RemoteAuthToken.user_id == content.id).delete()
             ub.session.query(ub.User_Sessions).filter(ub.User_Sessions.user_id == content.id).delete()
             ub.session.query(ub.KoboSyncedBooks).filter(ub.KoboSyncedBooks.user_id == content.id).delete()
+            ub.session.query(ub.OneDriveConnection).filter(ub.OneDriveConnection.user_id == content.id).delete()
+            job_ids = [j.id for j in ub.session.query(ub.OneDriveImportJob.id)
+                       .filter(ub.OneDriveImportJob.user_id == content.id).all()]
+            if job_ids:
+                ub.session.query(ub.OneDriveImportItem).filter(
+                    ub.OneDriveImportItem.job_id.in_(job_ids)).delete(synchronize_session=False)
+            ub.session.query(ub.OneDriveImportJob).filter(ub.OneDriveImportJob.user_id == content.id).delete()
             # delete KoboReadingState and all it's children
             kobo_entries = ub.session.query(ub.KoboReadingState).filter(ub.KoboReadingState.user_id == content.id).all()
             for kobo_entry in kobo_entries:

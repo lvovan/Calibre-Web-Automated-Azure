@@ -106,3 +106,20 @@ def test_without_ingest_path_finishes_immediately(upload):
     module, worker = upload
     task = module.TaskUpload("msg", "b")
     assert task.stat == worker.STAT_FINISH_SUCCESS
+
+
+def test_existing_marker_reports_already_in_library(upload, tmp_path, monkeypatch):
+    module, worker = upload
+    outcomes = tmp_path / "outcomes"
+    outcomes.mkdir()
+    monkeypatch.setattr(module, "INGEST_OUTCOME_DIR", str(outcomes))
+    stem = "onedrive_" + "n" * 200
+    (outcomes / (stem[:150 - len(".epub")] + ".epub")).write_text("existing")
+    path = str(tmp_path / (stem + ".epub"))
+
+    task = module.TaskUpload("msg", "b", ingest_path=path)
+    assert task.stat == worker.STAT_FINISH_SUCCESS
+    assert "already in library" in task.message
+    assert module.ingest_outcome(path, consume_marker=True) == module.OUTCOME_EXISTING
+    assert not list(outcomes.iterdir())
+    assert module.ingest_outcome(path) == module.OUTCOME_FAILED  # no marker, no cwa_import row

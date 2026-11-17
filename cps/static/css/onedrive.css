@@ -1,0 +1,23 @@
+/* OneDrive import page (templates/onedrive.html) */
+.onedrive-import { padding-inline: 2rem; max-width: 1100px; }
+.onedrive-import .od-account { margin: 10px 0; }
+.onedrive-import .od-disconnect { display: inline-block; margin-left: 10px; }
+.onedrive-import .od-help { margin-bottom: 15px; }
+.onedrive-import .od-breadcrumb { margin-bottom: 8px; background: transparent; padding-left: 0; }
+.onedrive-import .od-toolbar { display: flex; align-items: center; gap: 15px; margin-bottom: 8px; }
+.onedrive-import .od-toolbar .od-select-all { margin: 0; font-weight: normal; white-space: nowrap; }
+.onedrive-import .od-toolbar .od-filter { max-width: 320px; }
+.onedrive-import .od-list { max-height: 55vh; overflow-y: auto; margin-bottom: 8px; }
+.onedrive-import .od-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: transparent; }
+.onedrive-import .od-item .od-check { margin: 0; }
+.onedrive-import .od-item .od-icon { opacity: 0.8; }
+.onedrive-import .od-item .od-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.onedrive-import .od-item .od-meta { flex: 0 0 auto; font-size: 0.9em; }
+.onedrive-import .od-item.od-disabled { opacity: 0.45; }
+.onedrive-import .od-list-footer { min-height: 30px; }
+.onedrive-import .od-selection-bar {
+  position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
+  padding: 10px 0; margin-bottom: 10px; background: inherit; border-top: 1px solid rgba(128, 128, 128, 0.3);
+}
+.onedrive-import .od-selection-bar #od-selection-count { flex: 1 1 auto; }
+.onedrive-import .od-jobs .od-job-selection { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

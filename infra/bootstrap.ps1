@@ -12,6 +12,11 @@
   secrets/variables used by .github/workflows/azure-deploy.yml, reading the content storage
   account key with your own Azure credentials.
 
+  When -CustomDomainName is set (and -SkipOneDrive is not), also creates the "Import from OneDrive"
+  app registration (personal Microsoft accounts, redirect https://<domain>/onedrive/callback,
+  delegated Files.Read/User.Read/offline_access). A client secret is created for a new app, or
+  with -RotateOneDriveSecret. If your tenant blocks this, manual steps are printed instead.
+
 .EXAMPLE
   ./infra/bootstrap.ps1 -GitHubRepo lvovan/Calibre-Web-Automated-Azure `
     -ContentStorageAccountName mybooks -ContentStorageResourceGroup rg-storage -SetGitHubConfig
@@ -28,6 +33,9 @@ param(
   [string] $ContentStorageResourceGroup,
   [string] $LibraryShareName = 'library',
   [string] $CustomDomainName = '',
+  [string] $OneDriveAppName = 'cwa-onedrive',
+  [switch] $SkipOneDrive,
+  [switch] $RotateOneDriveSecret,
   [switch] $SetGitHubConfig
 )
 
@@ -111,10 +119,78 @@ if ($ContentStorageAccountName -and $ContentStorageResourceGroup) {
   $contentKey = Invoke-Az storage account keys list -n $ContentStorageAccountName -g $ContentStorageResourceGroup --query '[0].value' -o tsv
 }
 
+# ── Import from OneDrive: app registration for personal Microsoft accounts ──
+$oneDriveClientId = $null
+$oneDriveSecret = $null
+if ($CustomDomainName -and -not $SkipOneDrive) {
+  $redirectUri = "https://$CustomDomainName/onedrive/callback"
+  $graphAppId = '00000003-0000-0000-c000-000000000000'
+  $graphScopes = @(
+    @{ id = 'df85f4d6-205c-4ac5-a5ea-6bf408dba283'; type = 'Scope' } # Files.Read
+    @{ id = 'e1fe6dd8-ba31-4d61-89e7-88639da4683d'; type = 'Scope' } # User.Read
+    @{ id = '7427e0e9-2fba-42fe-b0c0-848c9e6a8182'; type = 'Scope' } # offline_access
+  )
+  function ConvertFrom-AzJson($Lines) { $text = ($Lines -join "`n").Trim(); if ($text) { $text | ConvertFrom-Json } }
+  function Invoke-GraphRest([string] $Method, [string] $Uri, $Body) {
+    $tmp = New-TemporaryFile
+    try {
+      $Body | ConvertTo-Json -Depth 10 | Set-Content -Path $tmp -Encoding utf8
+      ConvertFrom-AzJson (Invoke-Az rest --method $Method --uri $Uri --headers 'Content-Type=application/json' --body "@$tmp")
+    } finally { Remove-Item $tmp }
+  }
+  try {
+    Write-Host "OneDrive app registration $OneDriveAppName..."
+    $app = ConvertFrom-AzJson (Invoke-Az ad app list --display-name $OneDriveAppName `
+        --query '[0].{id:id,appId:appId,uris:web.redirectUris}' -o json)
+    $isNew = -not $app
+    if ($isNew) {
+      $app = Invoke-GraphRest POST 'https://graph.microsoft.com/v1.0/applications' @{
+        displayName            = $OneDriveAppName
+        signInAudience         = 'PersonalMicrosoftAccount'
+        api                    = @{ requestedAccessTokenVersion = 2 }
+        web                    = @{ redirectUris = @($redirectUri) }
+        requiredResourceAccess = @(@{ resourceAppId = $graphAppId; resourceAccess = $graphScopes })
+      }
+    } else {
+      $uris = @(@($app.uris) + $redirectUri | Where-Object { $_ } | Select-Object -Unique)
+      Invoke-GraphRest PATCH "https://graph.microsoft.com/v1.0/applications/$($app.id)" @{
+        web                    = @{ redirectUris = $uris }
+        requiredResourceAccess = @(@{ resourceAppId = $graphAppId; resourceAccess = $graphScopes })
+      } | Out-Null
+    }
+    $oneDriveClientId = $app.appId
+    if ($isNew -or $RotateOneDriveSecret) {
+      # A just-created app can take a few seconds to replicate
+      for ($i = 1; $i -le 6 -and -not $oneDriveSecret; $i++) {
+        $oneDriveSecret = & az ad app credential reset --id $oneDriveClientId --append `
+          --display-name 'cwa-onedrive' --years 2 --query password -o tsv 2>$null
+        if (-not $oneDriveSecret) { Start-Sleep -Seconds 10 }
+      }
+      if (-not $oneDriveSecret) { throw 'client secret creation failed' }
+      Write-Host 'OneDrive client secret created (expires in 2 years; rotate with -RotateOneDriveSecret).'
+    } else {
+      Write-Host 'OneDrive app exists; keeping its current secret (pass -RotateOneDriveSecret to create a new one).'
+    }
+  } catch {
+    Write-Warning "Could not create the OneDrive app registration ($_). Your tenant may block it; create it manually:"
+    Write-Host @"
+  1. Entra admin center > App registrations > New registration
+     Name: $OneDriveAppName
+     Supported account types: Personal Microsoft accounts only
+     Redirect URI: Web, $redirectUri
+  2. API permissions > Add > Microsoft Graph > Delegated: Files.Read, User.Read, offline_access
+  3. Certificates & secrets > New client secret
+  4. Set GitHub variable ONEDRIVE_CLIENT_ID (Application ID) and secret ONEDRIVE_CLIENT_SECRET, then redeploy.
+"@
+  }
+}
+
 if ($SetGitHubConfig) {
   if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'GitHub CLI (gh) not found.' }
   foreach ($k in $secrets.Keys) { $secrets[$k] | gh secret set $k --repo $GitHubRepo }
   if ($contentKey) { $contentKey | gh secret set CONTENT_STORAGE_ACCOUNT_KEY --repo $GitHubRepo }
+  if ($oneDriveClientId) { gh variable set ONEDRIVE_CLIENT_ID --repo $GitHubRepo --body $oneDriveClientId }
+  if ($oneDriveSecret) { $oneDriveSecret | gh secret set ONEDRIVE_CLIENT_SECRET --repo $GitHubRepo }
   foreach ($k in $variables.Keys) {
     if ($variables[$k]) { gh variable set $k --repo $GitHubRepo --body $variables[$k] }
   }
@@ -125,7 +201,9 @@ if ($SetGitHubConfig) {
   $secrets.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
   Write-Host '  CONTENT_STORAGE_ACCOUNT_KEY = <key of the content storage account>'
   Write-Host '  HARDCOVER_TOKEN = <optional>'
+  if ($oneDriveSecret) { Write-Host "  ONEDRIVE_CLIENT_SECRET = $oneDriveSecret" }
   Write-Host "`nSet these GitHub repository VARIABLES:"
   $variables.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
+  if ($oneDriveClientId) { Write-Host "  ONEDRIVE_CLIENT_ID = $oneDriveClientId" }
 }
 Write-Host "`nDone. Push to '$Branch' or run the 'Azure - build & deploy' workflow."

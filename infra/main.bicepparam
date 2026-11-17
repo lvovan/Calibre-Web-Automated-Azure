@@ -15,3 +15,6 @@ param libraryShareName = readEnvironmentVariable('LIBRARY_SHARE_NAME', 'library'
 
 param customDomainName = readEnvironmentVariable('CUSTOM_DOMAIN_NAME', '')
 param hardcoverToken = readEnvironmentVariable('HARDCOVER_TOKEN', '')
+
+param oneDriveClientId = readEnvironmentVariable('ONEDRIVE_CLIENT_ID', '')
+param oneDriveClientSecret = readEnvironmentVariable('ONEDRIVE_CLIENT_SECRET', '')

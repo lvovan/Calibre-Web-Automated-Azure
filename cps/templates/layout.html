@@ -159,6 +159,9 @@
                       </div>
                     </form>
                   </li>
+                  {% if onedrive_enabled %}
+                  <li><a id="top_onedrive" href="{{ url_for('onedrive.page') }}" title="{{_('Import from OneDrive')}}" aria-label="{{_('Import from OneDrive')}}"><span aria-hidden="true">&#9729;&#65039;</span> <span class="hidden-sm hidden-md hidden-lg">{{_('OneDrive')}}</span></a></li>
+                  {% endif %}
               {% endif %}
               {% if not current_user.is_anonymous and not simple%}
                 <li class="top_tasks"><a id="top_tasks" href="{{url_for('tasks.get_tasks_status')}}"><span class="glyphicon glyphicon-tasks"></span> <span class="hidden-sm">{{_('Tasks')}}</span></a></li>

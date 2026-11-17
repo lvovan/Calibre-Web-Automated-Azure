@@ -17,9 +17,64 @@ from cps.services.worker import CalibreTask, STAT_STARTED, STAT_FINISH_SUCCESS, 
 
 CWA_DB_PATH = "/config/cwa.db"
 INGEST_STATUS_FILE = os.environ.get("CWA_INGEST_STATUS_FILE", "/config/cwa_ingest_status")
+# Written by scripts/ingest_processor.py record_ingest_outcome()
+INGEST_OUTCOME_DIR = os.environ.get("CWA_INGEST_OUTCOME_DIR", "/config/.cwa_ingest_outcomes")
 # Must match the filename truncation in scripts/ingest_processor.py main()
 _INGEST_MAX_FILENAME = 150
 _POLL_INTERVAL = 2
+
+OUTCOME_IMPORTED = "imported"
+OUTCOME_EXISTING = "existing"
+OUTCOME_FAILED = "failed"
+
+
+def ingest_pending(path):
+    return os.path.exists(path) or os.path.exists(path + ".uploading")
+
+
+def ingest_outcome(path, is_format=False, consume_marker=False):
+    """Outcome of a file handed to cwa-ingest-service, or None while it is still in the ingest folder."""
+    if ingest_pending(path):
+        return None
+    for name in _ingest_names(path):
+        marker = os.path.join(INGEST_OUTCOME_DIR, name)
+        try:
+            with open(marker, "r", encoding="utf-8") as f:
+                outcome = f.read().strip()
+            if consume_marker:
+                os.remove(marker)
+        except OSError:
+            continue
+        if outcome == OUTCOME_EXISTING:
+            return OUTCOME_EXISTING
+    return OUTCOME_FAILED if _import_failed(path, is_format) else OUTCOME_IMPORTED
+
+
+def _ingest_names(path):
+    # ingest_processor renames over-long files before processing them
+    p = Path(path)
+    truncated = p.stem[:_INGEST_MAX_FILENAME - len(p.suffix)] + p.suffix
+    return [p.name] if truncated == p.name else [p.name, truncated]
+
+
+def _import_failed(path, is_format):
+    # Format uploads: ingest_processor keeps the manifest as *.cwa.failed.json on failure
+    if is_format:
+        return os.path.exists(path + ".cwa.failed.json")
+    # New books: ingest_processor records the file stem in cwa_import on success
+    p = Path(path)
+    stem = p.stem
+    truncated = stem[:_INGEST_MAX_FILENAME - len(p.suffix)]
+    try:
+        con = sqlite3.connect("file:{}?mode=ro".format(CWA_DB_PATH), uri=True, timeout=5)
+        try:
+            row = con.execute("SELECT 1 FROM cwa_import WHERE filename IN (?, ?) LIMIT 1",
+                              (stem, truncated)).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False  # outcome unknown: don't report a false failure
+    return row is None
 
 
 class TaskUpload(CalibreTask):
@@ -65,7 +120,8 @@ class TaskUpload(CalibreTask):
 
     def _poll_ingest(self):
         path = self.ingest_path
-        if os.path.exists(path) or os.path.exists(path + ".uploading"):
+        outcome = ingest_outcome(path, self.is_format)
+        if outcome is None:
             if self._ingest_service_status().startswith("processing:" + os.path.basename(path) + ":"):
                 self.progress = 0.5
                 self.message = N_("%(title)s (importing...)", title=self.book_title)
@@ -73,10 +129,13 @@ class TaskUpload(CalibreTask):
 
         self.end_time = datetime.now()
         self.progress = 1
-        if self._import_failed(path, self.is_format):
+        if outcome == OUTCOME_FAILED:
             self._stat = STAT_FAIL
             self.message = N_("%(title)s (import failed)", title=self.book_title)
             self.error = N_("See CWA Logs for details")
+        elif outcome == OUTCOME_EXISTING:
+            self._stat = STAT_FINISH_SUCCESS
+            self.message = N_("%(title)s (already in library)", title=self.book_title)
         else:
             self._stat = STAT_FINISH_SUCCESS
             self.message = N_("%(title)s (imported)", title=self.book_title)
@@ -88,26 +147,6 @@ class TaskUpload(CalibreTask):
                 return f.read().strip()
         except OSError:
             return ""
-
-    @staticmethod
-    def _import_failed(path, is_format):
-        # Format uploads: ingest_processor keeps the manifest as *.cwa.failed.json on failure
-        if is_format:
-            return os.path.exists(path + ".cwa.failed.json")
-        # New books: ingest_processor records the file stem in cwa_import on success
-        p = Path(path)
-        stem = p.stem
-        truncated = stem[:_INGEST_MAX_FILENAME - len(p.suffix)]
-        try:
-            con = sqlite3.connect("file:{}?mode=ro".format(CWA_DB_PATH), uri=True, timeout=5)
-            try:
-                row = con.execute("SELECT 1 FROM cwa_import WHERE filename IN (?, ?) LIMIT 1",
-                                  (stem, truncated)).fetchone()
-            finally:
-                con.close()
-        except sqlite3.Error:
-            return False  # outcome unknown: don't report a false failure
-        return row is None
 
     @property
     def name(self):

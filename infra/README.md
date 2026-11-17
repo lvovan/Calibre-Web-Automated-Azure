@@ -47,6 +47,7 @@ On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/ca
 - Azure CLI ≥ 2.53 (`az login`). You need Owner or User Access Administrator on the subscription or resource group for the bootstrap, plus permission to create Entra app registrations.
 - GitHub CLI (`gh auth login`), optional, to let the bootstrap set repository secrets.
 - An existing storage account (StorageV2, Standard) with **shared key access enabled** and an Azure Files share for the library. The account should be in the **same region** as the app; latency matters for SQLite. Use a **dedicated** account: the key grants full access to it.
+- A subscription where storage accounts may keep **shared key access** and **public network access** enabled. App Service storage mounts only support account keys. Policies that force `allowSharedKeyAccess=false` or `publicNetworkAccess=Disabled`, common in corporate tenants, make the mounts fail with `BYOSFailure ... Permission was denied` in the container log. Request a policy exemption for both storage accounts, or use another subscription.
 
 Create the library share if needed:
 

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="64" height="64">
+  <!-- Static favicon derived from the kthoom logo (logo.svg animates in from scale 0, so it renders blank as an icon). -->
+  <defs>
+    <radialGradient id="g" cx="0.5" cy="0.5" r="0.83143">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.7" stop-color="#ffff00"/>
+      <stop offset="1" stop-color="#ffff00"/>
+    </radialGradient>
+  </defs>
+  <path fill="url(#g)" stroke="#000" stroke-width="10" stroke-linejoin="round"
+        transform="translate(0,0) scale(1,1.56) translate(0,-1)"
+        d="m75,86l106,44l49,-87l73,56l51,-88l66,59l91,-59l-5,102l78,25l-50,72l44,99l-89,-38l-21,78.5l-83,-44.5l-50,62l-70,-53l-58,66l-57,-62l-93,57l8,-101l-56,-57l65,-50l1,-81z"/>
+  <path fill="#ff0000" stroke="#000" stroke-width="4" stroke-linejoin="round"
+        transform="translate(296,300) scale(2.6) translate(-130.25,-233.6)"
+        d="m122.25,172l28.5,0l-18,39l22.75,-25.75l31.75,0.25l-37,47.5l-3.5,61.5l-34,0.75l3.25,-45.5l-10.5,24.75l-32.25,-5l49,-97.5z"/>
+</svg>

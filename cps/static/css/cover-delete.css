@@ -2,7 +2,7 @@
 .book > .cover .cover-delete-btn {
     position: absolute;
     right: 6px;
-    bottom: 6px;
+    top: 6px;
     z-index: 20;
     width: 26px;
     height: 26px;
@@ -30,12 +30,6 @@
     background: rgba(200, 40, 40, 0.9);
     transform: scale(1.1);
     outline: none;
-}
-
-/* caliBlur desktop quick actions: free the bottom-right corner for the trash icon. */
-.book > .cover.has-cover-delete .send-ereader-btn {
-    bottom: auto;
-    top: 8px;
 }
 
 #coverDeleteModal .cover-delete-title {

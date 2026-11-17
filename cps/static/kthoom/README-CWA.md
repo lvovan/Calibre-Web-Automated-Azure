@@ -24,5 +24,7 @@ CWA-specific changes are marked with `CWA:` comments:
 - `cwa-main.js` / `cwa.css`: CWA entry point (bookmarks, prefetching, fallback, UI trimming).
   `cwa.css` also replaces kthoom's yellow/red accents with CWA's muted palette; the progress
   bar SVG colors are set in `cps/templates/readcbr.html`.
+- `favicon.svg`: static square tab icon derived from `logo.svg` (the logo animates in from
+  scale 0, so it renders blank as a favicon).
 
 Server side: `cps/comic_pages.py` lists and extracts CBZ/CBT/CBR pages; routes live in `cps/web.py`.

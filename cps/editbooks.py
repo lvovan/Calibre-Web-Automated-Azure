@@ -148,9 +148,10 @@ def upload():
                 # Now that manifest is written, perform the atomic rename to trigger ingest
                 os.replace(tmp_path, final_path)
 
-                # Queue a task entry for UX feedback
+                # Track the ingest of this file in the task list
                 upload_text = N_("Upload done, processing, please wait...")
-                WorkerThread.add(current_user.name, TaskUpload(upload_text, escape(requested_file.filename)))
+                WorkerThread.add(current_user.name, TaskUpload(upload_text, escape(requested_file.filename),
+                                                               ingest_path=final_path, is_format=True))
 
             except Exception as e:
                 log.error_or_exception("Failed to queue format upload for ingest: {}".format(e))
@@ -177,7 +178,8 @@ def upload():
                 tmp_path, final_path = _save_to_ingest_atomic_rename(requested_file, final_path)
                 os.replace(tmp_path, final_path) # No manifest needed, just rename
                 upload_text = N_("Upload done, processing, please wait...")
-                WorkerThread.add(current_user.name, TaskUpload(upload_text, escape(requested_file.filename)))
+                WorkerThread.add(current_user.name, TaskUpload(upload_text, escape(requested_file.filename),
+                                                               ingest_path=final_path))
             except Exception as e:
                 log.error_or_exception("Failed to queue upload for ingest: {}".format(e))
                 flash(_("Failed to queue upload for processing"), category="error")

@@ -10,6 +10,16 @@
     />
 {%- endmacro %}
 
+{% macro format_pills(book) -%}
+    {%- set formats = book.data|map(attribute='format')|map('lower')|unique|list -%}
+    {%- if formats %}
+    <span class="cover-formats">
+      {%- for fmt in formats[:2] %}<span class="cover-format-pill">{{ fmt }}</span>{% endfor -%}
+      {%- if formats|length > 2 %}<span class="cover-format-pill">+{{ formats|length - 2 }}</span>{% endif -%}
+    </span>
+    {%- endif %}
+{%- endmacro %}
+
 {% macro series(series, alt=None) -%}
     {%- set image_alt = alt if alt else image_title -%}
     {% set srcset = series|get_series_srcset %}

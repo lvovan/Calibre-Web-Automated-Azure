@@ -149,7 +149,7 @@ Setting `CUSTOM_DOMAIN_NAME` also sets `CWA_ALLOWED_HOSTS`, which makes the app 
 
 Users with the *Upload* permission get a ☁️ button next to **Upload**. It opens a page where they connect their personal OneDrive (Microsoft consumer account, read-only), browse it, and import:
 - **Selected files**: only formats this server accepts for upload; other files are greyed out.
-- **Selected folders**: every `.epub` file found recursively; other file types are ignored.
+- **Selected folders**: every file in one of those formats, found recursively; other file types are ignored.
 - **Duplicates**: files with the same content (OneDrive hash) are imported once. Books already imported from OneDrive, or already in the library (title/author match, regardless of the *automerge* setting), are skipped.
 
 Imports run in a persistent queue (app.db), two at a time, downloading one file at a time into the ingest folder. They survive restarts and appear on the **Tasks** page and under *Your imports* on the OneDrive page, where they can be cancelled. The connection is kept: the refresh token is stored encrypted in app.db until the user clicks **Disconnect**.

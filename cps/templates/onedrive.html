@@ -31,8 +31,8 @@
 
   <p class="text-muted od-help">
     {{ _('Select files or folders to import.') }}
-    {{ _('Files: %(formats)s.', formats=formats|join(', ')) }}
-    {% if folders_allowed %}{{ _('Folders: all .epub files they contain, including subfolders.') }}{% endif %}
+    {{ _('Supported formats: %(formats)s.', formats=formats|join(', ')) }}
+    {% if folders_allowed %}{{ _('Folders: all files in these formats they contain, including subfolders.') }}{% endif %}
     {{ _('Identical files and books already in your library are skipped.') }}
   </p>
 
@@ -85,7 +85,7 @@
   'empty': _('This folder is empty.'),
   'noMatch': _('No items match the filter.'),
   'unsupported': _('This file format cannot be imported'),
-  'folderNotAllowed': _('Folders can only be imported when EPUB uploads are allowed'),
+  'folderNotAllowed': _('Folders cannot be imported because no upload formats are allowed'),
   'selected': _('%(files)s file(s), %(folders)s folder(s) selected', files='{files}', folders='{folders}'),
   'nothingSelected': _('Nothing selected'),
   'importing': _('Queuing import...'),

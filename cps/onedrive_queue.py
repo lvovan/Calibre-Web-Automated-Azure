@@ -8,8 +8,8 @@
 
 Jobs and their files live in app.db (ub.OneDriveImportJob / OneDriveImportItem), so
 an import resumes after a restart. A dispatcher runs up to MAX_PARALLEL_JOBS jobs
-(FIFO). Each job first expands the selection (selected files + .epub files found
-recursively in selected folders), deduplicating by OneDrive content hash, then
+(FIFO). Each job first expands the selection (selected files + supported-format files
+found recursively in selected folders), deduplicating by OneDrive content hash, then
 downloads files one at a time into the ingest folder and follows each file
 through cwa-ingest-service.
 
@@ -319,9 +319,9 @@ class ImportQueue:
             if stop():
                 break
             if selected.get("folder"):
-                if "epub" not in allowed:
+                if not allowed:
                     continue
-                for entry in graph.walk_files(selected["id"], {"epub"}, should_stop=stop):
+                for entry in graph.walk_files(selected["id"], allowed, should_stop=stop):
                     add(entry)
             else:
                 try:

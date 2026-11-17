@@ -296,6 +296,6 @@ def describe(entry, allowed_formats):
         "folder": is_folder,
         "childCount": (entry.get("folder") or {}).get("childCount", 0) if is_folder else None,
         "size": entry.get("size", 0),
-        "importable": ("epub" in allowed_formats) if is_folder
+        "importable": bool(allowed_formats) if is_folder
         else ("file" in entry and extension(entry.get("name", "")) in allowed_formats),
     }

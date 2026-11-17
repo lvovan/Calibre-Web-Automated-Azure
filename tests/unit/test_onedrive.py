@@ -304,20 +304,21 @@ def test_import_dedups_skips_known_hashes_and_filters_formats(env, monkeypatch):
         ("a.epub", "imported"),     # first occurrence of H1
         ("b.epub", "duplicate"),    # same content as a.epub
         ("c.epub", "existing"),     # calibredb refused it: already in the library
+        ("notes.pdf", "imported"),  # any allowed format is imported from folders
         ("d.epub", "existing"),     # hash imported by an earlier job: never downloaded
         ("e.epub", "imported"),     # no hash: imported anyway
         ("tool.exe", "failed"),     # unsupported single file
         ("paper.pdf", "failed"),    # ingest failure
     ]
-    assert graph.downloads == ["a", "c", "e", "p"]  # notes.pdf ignored inside folders
+    assert graph.downloads == ["a", "c", "n", "e", "p"]  # readme.xyz ignored inside folders
     assert _job(env, job_id) == ("done", None)
     session = env.maker()
     known = {h.content_hash for h in session.query(env.ub.OneDriveImportedHash).all()}
     session.close()
-    assert known == {"qx:H1", "qx:H2", "qx:H4"}
+    assert known == {"qx:H1", "qx:H2", "qx:H4", "qx:H9"}
     assert env.added and env.added[0][0] == "reader"
     summary = env.q.summary(job_id)
-    assert (summary["imported"], summary["existing"], summary["duplicate"], summary["failed"]) == (2, 2, 1, 2)
+    assert (summary["imported"], summary["existing"], summary["duplicate"], summary["failed"]) == (3, 2, 1, 2)
     assert summary["last_book"] == "Title of e.epub" and summary["current"] is None
 
 

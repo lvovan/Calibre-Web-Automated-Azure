@@ -174,7 +174,7 @@ def page():
     formats = allowed_formats()
     return render_title_template("onedrive.html", title=_("Import from OneDrive"), page="onedrive",
                                  connection=_connection(), formats=sorted(formats),
-                                 folders_allowed="epub" in formats)
+                                 folders_allowed=bool(formats))
 
 
 @onedrive.route("/onedrive/connect")

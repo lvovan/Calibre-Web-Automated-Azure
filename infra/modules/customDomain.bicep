@@ -33,7 +33,8 @@ resource hostNameBinding 'Microsoft.Web/sites/hostNameBindings@2023-12-01' = {
 }
 
 resource certificate 'Microsoft.Web/certificates@2023-12-01' = {
-  name: '${webAppName}-${replace(customDomainName, '.', '-')}'
+  // Same name as the portal uses, so a certificate created there is reused instead of conflicting
+  name: '${customDomainName}-${webAppName}'
   location: location
   tags: tags
   properties: {

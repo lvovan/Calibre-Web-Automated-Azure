@@ -178,9 +178,9 @@
       {% else %}
       <input type="checkbox" id="koreader_sync_enabled" name="koreader_sync_enabled" value="True" style="accent-color: var(--color-secondary);" data-toggle="tooltip" data-placement="right" title="Does NOT require restart for changes to take effect">
       {% endif %}
-      <label for="koreader_sync_enabled" style="padding-left: 10px;">{{_('Enable KOReader Sync (CWA Plugin)')}}</label><br>
+      <label for="koreader_sync_enabled" style="padding-left: 10px;">{{_('Enable KOReader Sync')}}</label><br>
       <p class="cwa-settings-tooltip">
-        {{_('When enabled, CWA exposes the /kosync endpoints and stores KOReader-compatible checksums in metadata.db for progress syncing. Requires the KOReader plugin on your device.')}}
+        {{_('When enabled, CWA exposes the /kosync endpoints and stores KOReader-compatible checksums in metadata.db for progress syncing. Works with KOReader\'s built-in Progress sync (users must sign in to the web interface once with their password) or with the optional CWA plugin.')}}
         <br>
         {{_('Note: Enabling this starts a checksum backfill service at startup which can temporarily lock metadata.db. To stop a running backfill, restart the container after disabling.') }}
       </p>

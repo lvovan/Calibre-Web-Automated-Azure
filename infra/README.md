@@ -41,7 +41,7 @@ At startup, the `init-cwa-persistent-config` s6 service runs before the base ima
 | `WEBSITES_PORT` | `8083` | CWA listen port. |
 | `WEBSITES_ENABLE_APP_SERVICE_STORAGE` | `true` | Mounts persistent `/home`, which holds `/config`. |
 
-On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/calibre-library` isn't a mount, or if `/config` is neither a mount nor on persistent `/home`. This prevents data from being silently written to ephemeral disk.
+On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/calibre-library` isn't an Azure Files (network) mount, or if `/config` is neither a mount nor on persistent `/home`. This prevents data from being silently written to ephemeral disk, including the anonymous volume Docker creates for `/calibre-library` when no share is mounted.
 
 ## Prerequisites
 

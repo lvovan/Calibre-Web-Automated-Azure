@@ -26,3 +26,5 @@ requirements-dev.txt
 TEST*.md
 TESTING*.md
 .pytest_cache/
+# Azure deployment assets (not needed in the image)
+infra/

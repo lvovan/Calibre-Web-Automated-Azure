@@ -22,11 +22,18 @@
 # ==========================================================================
 ARG CALIBRE_RELEASE=9.1.0
 ARG KEPUBIFY_RELEASE=v4.0.4
+# Set to false to leave kepubify out (no KEPUB conversion / KEPUB delivery to Kobo).
+ARG INSTALL_KEPUBIFY=true
+# Space-separated requirements.txt package names to skip, for slimmer images
+# that don't need some optional integrations (all are import-guarded in cps/).
+ARG PIP_EXCLUDE=""
 
 FROM ghcr.io/linuxserver/baseimage-ubuntu:noble AS dependencies
 
 ARG CALIBRE_RELEASE
 ARG KEPUBIFY_RELEASE
+ARG INSTALL_KEPUBIFY
+ARG PIP_EXCLUDE
 
 # Set the default shell for the following RUN instructions to bash instead of sh
 SHELL ["/bin/bash", "-c"]
@@ -116,11 +123,22 @@ RUN \
   # This is essentially a repository of precompiled some of the most popular packages with C/C++ source code
   # This provides the install maximum compatibility with multiple different architectures including: x86_64, armv71 and aarch64
   # You can read more about python wheels here: https://realpython.com/python-wheels/
+  cp /app/calibre-web-automated/requirements.txt /tmp/requirements.txt && \
+  for pkg in $PIP_EXCLUDE; do \
+  echo "**** excluding python package: $pkg ****" && \
+  sed -i -E "/^${pkg}([<>=!~;[ ]|$)/Id" /tmp/requirements.txt; \
+  done && \
   /lsiopy/bin/pip install -U --no-cache-dir --find-links https://wheel-index.linuxserver.io/ubuntu/ -r \
-  /app/calibre-web-automated/requirements.txt -r /app/calibre-web-automated/optional-requirements.txt
+  /tmp/requirements.txt -r /app/calibre-web-automated/optional-requirements.txt && \
+  rm /tmp/requirements.txt
 
-# STEP 4 - Install kepubify
+# STEP 4 - Install kepubify (staged in /kepubify so the final COPY works when it is skipped)
 RUN \
+  mkdir -p /kepubify && \
+  if [[ "${INSTALL_KEPUBIFY,,}" != "true" ]]; then \
+  echo "**** skipping kepubify (INSTALL_KEPUBIFY=${INSTALL_KEPUBIFY}) ****"; \
+  exit 0; \
+  fi && \
   echo "**** install kepubify ****" && \
   if [[ $KEPUBIFY_RELEASE == 'newest' ]]; then \
   KEPUBIFY_RELEASE=$(curl -sX GET "https://api.github.com/repos/pgaskin/kepubify/releases/latest" \
@@ -128,14 +146,14 @@ RUN \
   fi && \
   if [ "$(uname -m)" == "x86_64" ]; then \
   curl -o \
-  /usr/bin/kepubify -L \
+  /kepubify/kepubify -L \
   https://github.com/pgaskin/kepubify/releases/download/${KEPUBIFY_RELEASE}/kepubify-linux-64bit; \
   elif [ "$(uname -m)" == "aarch64" ]; then \
   curl -o \
-  /usr/bin/kepubify -L \
+  /kepubify/kepubify -L \
   https://github.com/pgaskin/kepubify/releases/download/${KEPUBIFY_RELEASE}/kepubify-linux-arm64; \
   fi && \
-  chmod +x /usr/bin/kepubify
+  chmod +x /kepubify/kepubify
 
 # STEP 5 - Install Calibre
 RUN \
@@ -172,6 +190,8 @@ ARG BUILD_DATE
 ARG VERSION
 ARG CALIBRE_RELEASE
 ARG KEPUBIFY_RELEASE
+ARG INSTALL_KEPUBIFY
+ARG PIP_EXCLUDE
 
 LABEL build_version="Version:- ${VERSION}"
 LABEL build_date="${BUILD_DATE}"
@@ -180,13 +200,13 @@ LABEL maintainer="CrocodileStick"
 # Set the default shell for the following RUN instructions to bash instead of sh
 SHELL ["/bin/bash", "-c"]
 
-# Copy installed dependencies from the dependencies stage
+# Copy installed dependencies from the dependencies stage.
+# The Python 3.13 interpreter/stdlib is not copied: the apt install below provides
+# it, and copying it too would store a duplicate layer in the image.
 COPY --from=dependencies /lsiopy /lsiopy
-COPY --from=dependencies /usr/bin/kepubify /usr/bin/kepubify
+COPY --from=dependencies /kepubify/ /usr/bin/
 COPY --from=dependencies /app/calibre /app/calibre
 COPY --from=dependencies /usr/bin/lsof /usr/bin/lsof
-COPY --from=dependencies /usr/bin/python3.13 /usr/bin/python3.13
-COPY --from=dependencies /usr/lib/python3.13 /usr/lib/python3.13
 
 # Install only runtime packages (no build tools)
 RUN \
@@ -236,7 +256,12 @@ RUN \
   rm -rf \
   /tmp/* \
   /var/lib/apt/lists/* \
+  /var/cache/apt/* \
+  /var/log/apt/* \
+  /var/log/dpkg.log \
   /var/tmp/* \
+  /usr/share/doc/* \
+  /usr/share/man/* \
   /root/.cache
 
 # STEP 6 - Copy application files
@@ -251,6 +276,13 @@ RUN \
   # STEP 7.2 - Run CWA install script to make required dirs, set script permissions and add aliases for CLI commands  ect.
   chmod +x /app/calibre-web-automated/scripts/setup-cwa.sh && \
   /app/calibre-web-automated/scripts/setup-cwa.sh && \
+  # STEP 7.2.1 - Move PIP_EXCLUDE packages to optional-requirements.txt, otherwise
+  # the startup dependency check exits because a "required" package is missing
+  for pkg in $PIP_EXCLUDE; do \
+  grep -iE "^${pkg}([<>=!~;[ ]|$)" /app/calibre-web-automated/requirements.txt \
+  >> /app/calibre-web-automated/optional-requirements.txt || true; \
+  sed -i -E "/^${pkg}([<>=!~;[ ]|$)/Id" /app/calibre-web-automated/requirements.txt; \
+  done && \
   # STEP 7.3 - Create koplugin.zip from KOReader plugin folder
   echo "~~~~ Creating koplugin.zip from KOReader plugin folder... ~~~~" && \
   if [ -d "/app/calibre-web-automated/koreader/plugins/cwasync.koplugin" ]; then \
@@ -279,7 +311,7 @@ RUN \
   fi && \
   # STEP 7.5 - ADD files referencing the versions of the installed main packages
   echo "$VERSION" >| /app/CWA_RELEASE && \
-  echo "$KEPUBIFY_RELEASE" >| /app/KEPUBIFY_RELEASE && \
+  if [[ "${INSTALL_KEPUBIFY,,}" == "true" ]]; then echo "$KEPUBIFY_RELEASE" >| /app/KEPUBIFY_RELEASE; else echo "not installed" >| /app/KEPUBIFY_RELEASE; fi && \
   echo "$CALIBRE_RELEASE" > /CALIBRE_RELEASE
 
 # Add unrar from unrar stage

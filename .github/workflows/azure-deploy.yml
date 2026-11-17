@@ -73,8 +73,26 @@ jobs:
           build-args: |
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
             VERSION=${{ steps.meta.outputs.version }}
+            INSTALL_KEPUBIFY=false
+            PIP_EXCLUDE=google-api-python-client PyDrive2 oauth2client google-auth-oauthlib goodreads python-Levenshtein python-ldap Flask-SimpleLDAP scholarly
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Start the image on the runner (outside App Service, so the Azure storage
+      # checks are skipped) to catch startup regressions before deploying.
+      - name: Smoke-test image
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          docker run -d --name cwa -p 8083:8083 "$IMAGE"
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://localhost:8083/health; then ok=1; break; fi
+            sleep 5
+          done
+          docker logs cwa 2>&1 | tail -n 60
+          docker rm -f cwa > /dev/null
+          if [ "$ok" != 1 ]; then echo "::error::Image did not become healthy within 5 minutes"; exit 1; fi
 
   deploy:
     needs: build

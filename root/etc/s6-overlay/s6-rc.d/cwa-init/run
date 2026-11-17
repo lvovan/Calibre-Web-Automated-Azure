@@ -212,8 +212,17 @@ fi
 
 echo "[cwa-init] Setting binary paths in '/config/app.db' to the correct ones..."
 
+# Images built with INSTALL_KEPUBIFY=false have no kepubify; clear the path so
+# Kobo sync falls back to serving EPUB instead of calling a missing binary.
+KEPUBIFY_PATH=''
+if [[ -x /usr/bin/kepubify ]]; then
+    KEPUBIFY_PATH='/usr/bin/kepubify'
+else
+    echo "[cwa-init] kepubify not installed in this image; KEPUB features disabled."
+fi
+
 sqlite3 /config/app.db <<EOS
-    update settings set config_kepubifypath='/usr/bin/kepubify', config_converterpath='/usr/bin/ebook-convert', config_binariesdir='/usr/bin';
+    update settings set config_kepubifypath='${KEPUBIFY_PATH}', config_converterpath='/usr/bin/ebook-convert', config_binariesdir='/usr/bin';
 EOS
 
 if [[ $? == 0 ]]

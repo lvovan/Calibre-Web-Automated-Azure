@@ -52,6 +52,17 @@ App Service resolves Key Vault references in app settings into environment varia
 
 On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/calibre-library` isn't an Azure Files (network) mount, or if `/config` is neither a mount nor on persistent `/home`. This prevents data from being silently written to ephemeral disk, including the anonymous volume Docker creates for `/calibre-library` when no share is mounted.
 
+### Slimmer image
+
+The `azure-deploy.yml` workflow sets two Dockerfile build arguments to leave out features this deployment doesn't use. Both default to the full upstream image, so other builds are unchanged.
+
+| Build argument | Value in `azure-deploy.yml` | Effect |
+|---|---|---|
+| `INSTALL_KEPUBIFY` | `false` | No kepubify. KEPUB conversion is unavailable, and Kobo sync sends plain EPUB instead of KEPUB. |
+| `PIP_EXCLUDE` | `google-api-python-client PyDrive2 oauth2client google-auth-oauthlib goodreads python-Levenshtein python-ldap Flask-SimpleLDAP scholarly` | Drops the Google Drive library, Gmail sending, Goodreads, LDAP login and the Google Scholar metadata source. |
+
+The packages in `PIP_EXCLUDE` are moved to `optional-requirements.txt` inside the image. The startup dependency check treats them as optional, so it doesn't stop the app. To get a feature back, remove its package from `PIP_EXCLUDE` (or set `INSTALL_KEPUBIFY=true`) and push.
+
 ## Prerequisites
 
 - Azure CLI ≥ 2.53 (`az login`). You need Owner or User Access Administrator on the subscription or resource group for the bootstrap, plus permission to create Entra app registrations.

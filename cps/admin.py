@@ -2810,26 +2810,10 @@ def _handle_edit_user(to_save, content, languages, translations, kobo_support):
 
     except Exception as ex:
         log.error(ex)
+        # Discard the partial edits; edit_user then re-renders the form with its full context.
+        ub.session.rollback()
         flash(str(ex), category="error")
-        opds_context = _build_opds_context(content)
-        magic_shelf_context = _build_magic_shelf_order_context(content)
-        return render_title_template("user_edit.html",
-                                     translations=translations,
-                                     languages=languages,
-                                     mail_configured=config.get_mail_server_configured(),
-                                     kobo_support=kobo_support,
-                                     new_user=0,
-                                     content=content,
-                                     config=config,
-                                     registered_oauth=oauth_bb.oauth_check,
-                                     opds_root_order_string=opds_context["opds_root_order_string"],
-                                     opds_hidden_entries_string=opds_context["opds_hidden_entries_string"],
-                                     opds_root_labels=opds_context["opds_root_labels"],
-                                     magic_shelf_order_string=magic_shelf_context["magic_shelf_order_string"],
-                                     magic_shelf_order_labels=magic_shelf_context["magic_shelf_order_labels"],
-                                     magic_shelf_order_mode=magic_shelf_context["magic_shelf_order_mode"],
-                                     title=_("Edit User %(nick)s", nick=content.name),
-                                     page="edituser")
+        return None
     try:
         ub.session_commit()
         flash(_("User '%(nick)s' updated", nick=content.name), category="success")

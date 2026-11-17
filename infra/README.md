@@ -215,6 +215,16 @@ Run through this once after the first deployment:
 
 ## Keeping up with upstream
 
+**When to update:** admins see a "CWA UPDATE AVAILABLE" banner (at most once a day) when [crocodilestick/Calibre-Web-Automated](https://github.com/crocodilestick/Calibre-Web-Automated/releases) publishes a release newer than the one this fork contains. Images are versioned `<newest upstream tag in the fork>-azure.<sha>`, and the running app re-checks GitHub daily, not just at container start. Requires "CWA update notifications" enabled in CWA Settings (default).
+
+**How to update:**
+```bash
+git remote add upstream https://github.com/crocodilestick/Calibre-Web-Automated.git  # once
+git fetch upstream --tags
+git merge v4.x.y            # the release tag from the banner
+git push                    # triggers build & deploy
+```
+
 Azure-specific changes are isolated so upstream releases merge cleanly:
 
 - `infra/` (including this guide) and `.github/workflows/azure-deploy.yml`: new files.

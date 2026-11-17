@@ -19,6 +19,9 @@ from .ub import User
 # CWA specific imports
 from datetime import datetime
 import os.path
+import time
+
+import requests
 
 import sys
 sys.path.insert(1, '/app/calibre-web-automated/scripts/')
@@ -143,11 +146,36 @@ def get_sidebar_config(kwargs=None):
 
     return sidebar, simple
 
+
+_UPSTREAM_RELEASE_API = "https://api.github.com/repos/crocodilestick/calibre-web-automated/releases/latest"
+# cwa-init fetches the stable version at container start; refresh it daily so
+# long-running containers (e.g. on App Service) still notice new releases.
+_stable_cache = {"version": constants.STABLE_VERSION, "checked": time.time()}
+
+
+def _latest_stable_version() -> str:
+    if time.time() - _stable_cache["checked"] < 86400:
+        return _stable_cache["version"]
+    _stable_cache["checked"] = time.time()
+    try:
+        resp = requests.get(_UPSTREAM_RELEASE_API, timeout=3,
+                            headers={"Accept": "application/vnd.github+json", "User-Agent": constants.USER_AGENT})
+        resp.raise_for_status()
+        tag = (resp.json().get("tag_name") or "").strip()
+        if tag:
+            _stable_cache["version"] = tag
+            with open("/app/CWA_STABLE_RELEASE", "w") as f:
+                f.write(tag + "\n")
+    except Exception as e:
+        log.debug("Could not refresh latest CWA release: %s", e)
+    return _stable_cache["version"]
+
+
 # Checks if an update for CWA is available, returning True if yes
 def cwa_update_available() -> tuple[bool, str, str]:
     try:
         current_version = constants.INSTALLED_VERSION
-        tag_name = constants.STABLE_VERSION
+        tag_name = _latest_stable_version()
 
         def _normalize_version(value: str) -> str:
             # Azure fork builds are "<upstream tag>-azure.<sha>"; compare on the upstream tag
@@ -189,7 +217,10 @@ def cwa_update_notification() -> None:
 
         update_available, current_version, tag_name = cwa_update_available()
         if update_available:
-            message = _(f"⚡🚨 CWA UPDATE AVAILABLE! 🚨⚡ Current - {current_version} | Newest - {tag_name} | To update, just re-pull the image! This message will only display once per day |")
+            if "-azure." in current_version:
+                message = _(f"⚡🚨 CWA UPDATE AVAILABLE! 🚨⚡ Current - {current_version} | Newest - {tag_name} | To update, merge the upstream release into this fork and push to redeploy. This message will only display once per day |")
+            else:
+                message = _(f"⚡🚨 CWA UPDATE AVAILABLE! 🚨⚡ Current - {current_version} | Newest - {tag_name} | To update, just re-pull the image! This message will only display once per day |")
             flash(_(message), category="cwa_update")
             print(f"[cwa-update-notification-service] {message}", flush=True)
 

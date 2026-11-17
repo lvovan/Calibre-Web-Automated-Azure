@@ -40,6 +40,8 @@ SHELL ["/bin/bash", "-c"]
 
 # STEP 1 - Install Required Packages
 RUN \
+  # The deadsnakes PPA (Launchpad) intermittently returns 503: retry downloads
+  echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries && \
   # STEP 1.1 - Add deadsnakes PPA for Python 3.13 and install required apt packages
   echo "**** add deadsnakes PPA for Python 3.13 ****" && \
   apt-get update && \
@@ -210,6 +212,7 @@ COPY --from=dependencies /usr/bin/lsof /usr/bin/lsof
 
 # Install only runtime packages (no build tools)
 RUN \
+  echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries && \
   echo "**** add deadsnakes PPA for Python 3.13 runtime ****" && \
   apt-get update && \
   apt-get install -y --no-install-recommends software-properties-common && \

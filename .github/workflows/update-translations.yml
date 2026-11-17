@@ -23,6 +23,7 @@ concurrency:
 jobs:
   update-translations:
     runs-on: ubuntu-latest
+    if: github.repository == 'crocodilestick/Calibre-Web-Automated'
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4

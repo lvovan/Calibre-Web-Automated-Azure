@@ -13,6 +13,7 @@ jobs:
   # --------------------------------------------------------------------------------
   build-amd64:
     runs-on: ubuntu-latest
+    if: github.repository == 'crocodilestick/Calibre-Web-Automated'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -89,6 +90,7 @@ jobs:
   build-arm:
     # Use your self-hosted runner labels here
     runs-on: [self-hosted, linux, ARM64]
+    if: github.repository == 'crocodilestick/Calibre-Web-Automated'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -179,6 +181,7 @@ jobs:
   # --------------------------------------------------------------------------------
   merge:
     runs-on: ubuntu-latest
+    if: github.repository == 'crocodilestick/Calibre-Web-Automated'
     needs: [build-amd64, build-arm]
     steps:
       - name: Checkout code

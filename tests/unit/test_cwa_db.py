@@ -361,3 +361,35 @@ class TestCWADBErrorHandling:
 if __name__ == '__main__':
     # Allow running directly
     pytest.main([__file__, '-v'])
+
+
+@pytest.mark.unit
+class TestEnvDefaultOverrides:
+    """CWA_DISABLE_PROCESSED_BACKUPS changes first-run defaults only."""
+
+    BACKUP_SETTINGS = ("auto_backup_imports", "auto_backup_conversions", "auto_backup_epub_fixes")
+
+    def test_new_install_has_backups_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CWA_DB_PATH", str(tmp_path))
+        monkeypatch.setenv("CWA_DISABLE_PROCESSED_BACKUPS", "true")
+        db = CWA_DB()
+        for setting in self.BACKUP_SETTINGS:
+            assert db.cwa_settings[setting] == 0
+            assert db.cwa_default_settings[setting] == 0
+        assert db.cwa_settings["default_settings"] == 1
+
+    def test_existing_install_is_not_changed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CWA_DB_PATH", str(tmp_path))
+        monkeypatch.delenv("CWA_DISABLE_PROCESSED_BACKUPS", raising=False)
+        CWA_DB().con.close()
+        monkeypatch.setenv("CWA_DISABLE_PROCESSED_BACKUPS", "true")
+        db = CWA_DB()
+        for setting in self.BACKUP_SETTINGS:
+            assert db.cwa_settings[setting] == 1
+
+    def test_new_install_has_auto_convert_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CWA_DB_PATH", str(tmp_path))
+        monkeypatch.setenv("CWA_DISABLE_AUTO_CONVERT", "true")
+        db = CWA_DB()
+        assert db.cwa_settings["auto_convert"] == 0
+        assert db.cwa_default_settings["auto_convert"] == 0

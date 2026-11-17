@@ -36,6 +36,26 @@ done
 
 echo "[cwa-init] Environment verification complete"
 
+is_mount() {
+  mountpoint -q "$1" 2>/dev/null || python3 -c 'import os,sys; sys.exit(0 if os.path.ismount(sys.argv[1]) else 1)' "$1"
+}
+
+# Azure App Service: refuse to start on ephemeral container disk if the Azure Files mounts are missing
+if [ -n "${WEBSITE_SITE_NAME}" ]; then
+  echo "[cwa-init][azure] Azure App Service detected (site: ${WEBSITE_SITE_NAME})"
+  for mnt in "/calibre-library" "/config"; do
+    if is_mount "$mnt"; then
+      echo "[cwa-init][azure] $mnt is mounted"
+    else
+      echo "[cwa-init][azure] ERROR: $mnt is not a mounted Azure Files share. Data would be lost on restart. Check the web app's path mappings."
+      exit 1
+    fi
+  done
+  if ! [[ "${NETWORK_SHARE_MODE,,}" =~ ^(true|1|yes|on)$ ]]; then
+    echo "[cwa-init][azure] WARNING: NETWORK_SHARE_MODE is not enabled; SQLite WAL and inotify are unreliable on Azure Files (SMB)."
+  fi
+fi
+
 # FROM lscio/docker-calibre-web - init-calibre-web-config.sh
 # create symlinks for imagemagick policy.xml
 echo "[cwa-init] Setting up ImageMagick policy..."
@@ -94,6 +114,9 @@ install -d -o abc -g abc /config/processed_books/fixed_originals
 install -d -o abc -g abc /config/processed_books/duplicate_resolutions
 install -d -o abc -g abc /config/log_archive
 install -d -o abc -g abc /config/.cwa_conversion_tmp
+if [ -n "${CWA_TMP_CONVERSION_DIR}" ]; then
+  install -d -o abc -g abc "${CWA_TMP_CONVERSION_DIR}"
+fi
 
 # Ensure ingest directory exists and is writable (matches dirs.json)
 INGEST_DIR=$(python3 - <<'PY'
@@ -110,7 +133,7 @@ if [ -n "$INGEST_DIR" ]; then
   mkdir -p "$INGEST_DIR" 2>/dev/null || true
   # Set ownership unless network share mode (only skip for /cwa-book-ingest)
   if [ "${NETWORK_SHARE_MODE,,}" = "true" ] || [ "${NETWORK_SHARE_MODE}" = "1" ] || [ "${NETWORK_SHARE_MODE,,}" = "yes" ] || [ "${NETWORK_SHARE_MODE,,}" = "on" ]; then
-    if [ "$INGEST_DIR" = "/cwa-book-ingest" ]; then
+    if [ "$INGEST_DIR" = "/cwa-book-ingest" ] && is_mount "$INGEST_DIR"; then
       echo "[cwa-init] NETWORK_SHARE_MODE=true detected; skipping chown of $INGEST_DIR"
     else
       chown -R abc:abc "$INGEST_DIR" 2>/dev/null || true
@@ -266,6 +289,14 @@ echo "[cwa-init] Preparing to set ownership of everything in$dirs to abc:abc..."
 
 for d in "${requiredDirs[@]}"; do
   if [ "${NETWORK_SHARE_MODE,,}" = "true" ] || [ "${NETWORK_SHARE_MODE}" = "1" ] || [ "${NETWORK_SHARE_MODE,,}" = "yes" ] || [ "${NETWORK_SHARE_MODE,,}" = "on" ]; then
+    case "$d" in
+      /cwa-book-ingest|/cwa-book-ingest/*)
+        if ! is_mount /cwa-book-ingest; then
+          chown -R abc:abc "$d"
+          continue
+        fi
+        ;;
+    esac
     case "$d" in
       /config|/config/*|/calibre-library|/calibre-library/*|/cwa-book-ingest|/cwa-book-ingest/*)
         echo "[cwa-init] NETWORK_SHARE_MODE=true detected; skipping chown of $d"

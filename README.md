@@ -314,6 +314,10 @@ Please suggest any ideas or wishes you might have! we're open to anything!
 
 # How To Install 📖
 
+## Azure App Service ☁️
+
+This fork can be deployed to Azure App Service (Web App for Containers), with the library on Azure Files, using Bicep templates and a GitHub Actions workflow. See [infra/README.md](infra/README.md).
+
 ## Quick Install 🚀
 
 1. Download the Docker Compose template file using the command below:

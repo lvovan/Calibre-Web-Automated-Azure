@@ -165,7 +165,7 @@ class LibraryConverter:
 
         ingest_folder = f"{dirs['ingest_folder']}/"
         library_dir = f"{dirs['calibre_library_dir']}/"
-        tmp_conversion_dir = f"{dirs['tmp_conversion_dir']}/"
+        tmp_conversion_dir = f"{os.environ.get('CWA_TMP_CONVERSION_DIR') or dirs['tmp_conversion_dir']}/"
 
         return ingest_folder, library_dir, tmp_conversion_dir
 

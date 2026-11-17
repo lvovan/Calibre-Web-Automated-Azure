@@ -109,3 +109,20 @@ def test_optional_cps_modules_retry_after_partial_load(monkeypatch, tmp_path):
 
     assert "if _GDRIVE_AVAILABLE and _CPS_AVAILABLE:" in source
     assert "if _GDRIVE_AVAILABLE or _CPS_AVAILABLE:" not in source
+
+def test_tmp_conversion_dir_env_override(monkeypatch, tmp_path):
+    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    monkeypatch.syspath_prepend(str(scripts_dir))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    ingest_processor = importlib.import_module("ingest_processor")
+    dirs_json = tmp_path / "dirs.json"
+    dirs_json.write_text(
+        '{"ingest_folder": "/ingest", "calibre_library_dir": "/lib", "tmp_conversion_dir": "/config/.cwa_conversion_tmp"}'
+    )
+    get_dirs = ingest_processor.NewBookProcessor.get_dirs
+
+    monkeypatch.delenv("CWA_TMP_CONVERSION_DIR", raising=False)
+    assert get_dirs(None, str(dirs_json))[2] == "/config/.cwa_conversion_tmp/"
+
+    monkeypatch.setenv("CWA_TMP_CONVERSION_DIR", "/tmp/cwa_conversion")
+    assert get_dirs(None, str(dirs_json)) == ("/ingest/", "/lib/", "/tmp/cwa_conversion/")

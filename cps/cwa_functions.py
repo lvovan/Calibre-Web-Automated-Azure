@@ -1846,7 +1846,7 @@ def get_tmp_conversion_dir() -> str:
     dirs = {}
     with open(DIRS_JSON, 'r') as f:
         dirs: dict[str, str] = json.load(f)
-    tmp_conversion_dir = f"{dirs['tmp_conversion_dir']}/"
+    tmp_conversion_dir = f"{os.environ.get('CWA_TMP_CONVERSION_DIR') or dirs['tmp_conversion_dir']}/"
 
     return tmp_conversion_dir
 

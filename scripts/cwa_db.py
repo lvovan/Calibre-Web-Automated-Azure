@@ -39,6 +39,8 @@ class CWA_DB:
         self.tables, self.schema = self.make_tables()
 
         self.cwa_default_settings = self.get_cwa_default_settings()
+        self.env_default_overrides = self.get_env_default_overrides()
+        self.cwa_default_settings |= self.env_default_overrides
         self.ensure_settings_schema_match()
         self.match_stat_table_columns_with_schema()
         self.ensure_scheduled_jobs_schema()
@@ -161,6 +163,19 @@ class CWA_DB:
             default_settings |= {setting_name:setting_value}
 
         return default_settings
+
+
+    def get_env_default_overrides(self) -> dict:
+        """Deployment-level default overrides from env vars. Only applied to new installs or when resetting to defaults."""
+        def env_flag(name: str) -> bool:
+            return os.environ.get(name, "false").strip().lower() in ("1", "true", "yes", "on")
+
+        overrides = {}
+        if env_flag("CWA_DISABLE_PROCESSED_BACKUPS"):
+            overrides |= {"auto_backup_imports": 0, "auto_backup_conversions": 0, "auto_backup_epub_fixes": 0}
+        if env_flag("CWA_DISABLE_AUTO_CONVERT"):
+            overrides |= {"auto_convert": 0}
+        return {k: v for k, v in overrides.items() if k in self.cwa_default_settings}
 
 
     def ensure_settings_schema_match(self) -> None:
@@ -492,6 +507,8 @@ class CWA_DB:
         self.cur.execute("SELECT * FROM cwa_settings")
         if self.cur.fetchall() == []: # If settings table is empty, populates it with default values
             self.cur.execute("INSERT INTO cwa_settings DEFAULT VALUES;")
+            for setting, value in getattr(self, "env_default_overrides", {}).items():
+                self.cur.execute(f"UPDATE cwa_settings SET {setting}=?;", (value,))
             self.con.commit()
             
         self.cur.execute("SELECT * FROM cwa_settings")

@@ -12,6 +12,7 @@ on:
 jobs:
   dockerHubDescription:
     runs-on: ubuntu-latest
+    if: github.repository == 'crocodilestick/Calibre-Web-Automated'
     steps:
     - uses: actions/checkout@v4
 

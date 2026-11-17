@@ -1,0 +1,146 @@
+# Builds the CWA container image, publishes it to GHCR and deploys infra/main.bicep to Azure App Service.
+# One-time setup: run infra/bootstrap.ps1 (or infra/bootstrap.sh) - see infra/README.md.
+name: Azure - build & deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cps/**'
+      - 'scripts/**'
+      - 'root/**'
+      - 'koreader/**'
+      - 'empty_library/**'
+      - 'Dockerfile'
+      - '*requirements*.txt'
+      - 'dirs.json'
+      - 'cps.py'
+      - 'infra/**'
+      - '.github/workflows/azure-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      skip_build:
+        description: 'Skip the image build and redeploy the current :latest image'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: azure-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository != 'crocodilestick/Calibre-Web-Automated' && !inputs.skip_build
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute image name and version
+        id: meta
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          base_version="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+          echo "image=${repo}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "version=${base_version}-azure.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.repo }}:latest
+          build-args: |
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+            VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: always() && github.repository != 'crocodilestick/Calibre-Web-Automated' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep
+        id: deploy
+        env:
+          CWA_CONTAINER_IMAGE: ${{ needs.build.outputs.image || format('ghcr.io/{0}:latest', github.repository) }}
+          CONTENT_STORAGE_CONNECTION_STRING: ${{ secrets.CONTENT_STORAGE_CONNECTION_STRING }}
+          CONTENT_STORAGE_ACCOUNT_NAME: ${{ vars.CONTENT_STORAGE_ACCOUNT_NAME }}
+          CONTENT_STORAGE_ACCOUNT_KEY: ${{ secrets.CONTENT_STORAGE_ACCOUNT_KEY }}
+          LIBRARY_SHARE_NAME: ${{ vars.LIBRARY_SHARE_NAME || 'library' }}
+          CUSTOM_DOMAIN_NAME: ${{ vars.CUSTOM_DOMAIN_NAME }}
+          HARDCOVER_TOKEN: ${{ secrets.HARDCOVER_TOKEN }}
+        run: |
+          export CWA_CONTAINER_IMAGE="${CWA_CONTAINER_IMAGE,,}"
+          # A connection string takes precedence over the separate account name/key settings
+          if [ -n "$CONTENT_STORAGE_CONNECTION_STRING" ]; then
+            CONTENT_STORAGE_ACCOUNT_NAME=$(sed -n 's/.*AccountName=\([^;]*\).*/\1/p' <<<"$CONTENT_STORAGE_CONNECTION_STRING")
+            CONTENT_STORAGE_ACCOUNT_KEY=$(sed -n 's/.*AccountKey=\([^;]*\).*/\1/p' <<<"$CONTENT_STORAGE_CONNECTION_STRING")
+            echo "::add-mask::${CONTENT_STORAGE_ACCOUNT_KEY}"
+          fi
+          export CONTENT_STORAGE_ACCOUNT_NAME CONTENT_STORAGE_ACCOUNT_KEY
+          if [ -n "$CONTENT_STORAGE_ACCOUNT_NAME" ] && [ -z "$CONTENT_STORAGE_ACCOUNT_KEY" ]; then
+            echo "::error::Content storage account name is set but its key is missing."
+            exit 1
+          fi
+          if [ -z "$CONTENT_STORAGE_ACCOUNT_NAME" ]; then
+            echo "::warning::Content storage is not configured: /calibre-library is not mounted and the app will not start. Set the CONTENT_STORAGE_CONNECTION_STRING secret and redeploy."
+            echo "content_configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "content_configured=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Deploying image ${CWA_CONTAINER_IMAGE}"
+          outputs=$(az deployment group create \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "cwa-${GITHUB_RUN_ID}" \
+            --parameters infra/main.bicepparam \
+            --query properties.outputs -o json)
+          echo "default_url=$(jq -r .defaultUrl.value <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deployment outputs"
+            echo "- Default URL: $(jq -r .defaultUrl.value <<<"$outputs")"
+            echo "- Custom URL: $(jq -r .customUrl.value <<<"$outputs")"
+            echo "- Custom domain verification ID (asuid TXT): $(jq -r .customDomainVerificationId.value <<<"$outputs")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait for /health
+        if: steps.deploy.outputs.content_configured == 'true'
+        run: |
+          url="${{ steps.deploy.outputs.default_url }}/health"
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url" || true)
+            echo "Attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 20
+          done
+          echo "::error::App did not become healthy within 20 minutes. Check Log stream / AppServiceConsoleLogs."
+          exit 1

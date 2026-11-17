@@ -40,17 +40,26 @@ is_mount() {
   mountpoint -q "$1" 2>/dev/null || python3 -c 'import os,sys; sys.exit(0 if os.path.ismount(sys.argv[1]) else 1)' "$1"
 }
 
-# Azure App Service: refuse to start on ephemeral container disk if the Azure Files mounts are missing
+# Azure App Service: refuse to start on ephemeral container disk if persistent storage is missing.
+# /calibre-library must be an Azure Files mount; /config must be a mount or live on the
+# platform's persistent /home storage (see init-cwa-persistent-config).
 if [ -n "${WEBSITE_SITE_NAME}" ]; then
   echo "[cwa-init][azure] Azure App Service detected (site: ${WEBSITE_SITE_NAME})"
-  for mnt in "/calibre-library" "/config"; do
-    if is_mount "$mnt"; then
-      echo "[cwa-init][azure] $mnt is mounted"
-    else
-      echo "[cwa-init][azure] ERROR: $mnt is not a mounted Azure Files share. Data would be lost on restart. Check the web app's path mappings."
-      exit 1
-    fi
-  done
+  if is_mount "/calibre-library"; then
+    echo "[cwa-init][azure] /calibre-library is mounted"
+  else
+    echo "[cwa-init][azure] ERROR: /calibre-library is not a mounted Azure Files share. Data would be lost on restart. Check the web app's path mappings."
+    exit 1
+  fi
+  config_real="$(readlink -f /config)"
+  if is_mount "/config"; then
+    echo "[cwa-init][azure] /config is mounted"
+  elif [[ "$config_real" == /home/* ]] && is_mount "/home"; then
+    echo "[cwa-init][azure] /config is stored on persistent App Service storage ($config_real)"
+  else
+    echo "[cwa-init][azure] ERROR: /config ($config_real) is not on persistent storage. Set WEBSITES_ENABLE_APP_SERVICE_STORAGE=true or mount a share at /config."
+    exit 1
+  fi
   if ! [[ "${NETWORK_SHARE_MODE,,}" =~ ^(true|1|yes|on)$ ]]; then
     echo "[cwa-init][azure] WARNING: NETWORK_SHARE_MODE is not enabled; SQLite WAL and inotify are unreliable on Azure Files (SMB)."
   fi

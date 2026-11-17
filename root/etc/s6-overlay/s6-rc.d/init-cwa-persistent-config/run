@@ -1,0 +1,41 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+# Azure App Service: persist /config on the platform's /home storage.
+# Runs before the base image init touches /config. No-op elsewhere.
+
+if [[ -z "${WEBSITE_SITE_NAME:-}" ]]; then
+    exit 0
+fi
+
+case "${WEBSITES_ENABLE_APP_SERVICE_STORAGE:-false}" in
+    true|TRUE|True|1) ;;
+    *) exit 0 ;;
+esac
+
+TARGET="${CWA_PERSISTENT_CONFIG_DIR:-/home/config}"
+
+if [[ -L /config ]]; then
+    echo "[cwa-persistent-config] /config already links to $(readlink -f /config)"
+    exit 0
+fi
+
+if mountpoint -q /config 2>/dev/null; then
+    echo "[cwa-persistent-config] /config is already a mount; leaving it in place"
+    exit 0
+fi
+
+if ! mkdir -p "${TARGET}"; then
+    echo "[cwa-persistent-config] ERROR: cannot create ${TARGET}" >&2
+    exit 1
+fi
+
+# Seed persistent storage with any files baked into the image on first start.
+if [[ -d /config ]] && [[ -z "$(ls -A "${TARGET}" 2>/dev/null)" ]]; then
+    cp -a /config/. "${TARGET}/" 2>/dev/null || cp -r /config/. "${TARGET}/"
+fi
+
+rm -rf /config
+ln -s "${TARGET}" /config
+# Ownership changes may be ignored by the /home share; that is fine because it is world-writable.
+chown "${PUID:-1000}:${PGID:-1000}" "${TARGET}" 2>/dev/null || true
+echo "[cwa-persistent-config] /config -> ${TARGET}"

@@ -67,18 +67,6 @@ module monitoring 'modules/monitoring.bicep' = {
   }
 }
 
-module opsStorage 'modules/opsStorage.bicep' = {
-  name: 'opsStorage'
-  params: {
-    location: location
-    storageAccountName: take('st${namePrefix}${suffix}', 24)
-    configShareName: 'config'
-    configShareQuotaGiB: 5
-    shareSoftDeleteDays: 7
-    tags: tags
-  }
-}
-
 module appService 'modules/appService.bicep' = {
   name: 'appService'
   params: {
@@ -91,8 +79,6 @@ module appService 'modules/appService.bicep' = {
     contentStorageAccountName: contentStorageAccountName
     contentStorageAccountKey: contentStorageAccountKey
     libraryShareName: libraryShareName
-    opsStorageAccountName: opsStorage.outputs.storageAccountName
-    configShareName: opsStorage.outputs.configShareName
     logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     hardcoverToken: hardcoverToken
@@ -116,4 +102,3 @@ output defaultUrl string = 'https://${appService.outputs.defaultHostName}'
 output customUrl string = empty(customDomainName) ? '' : 'https://${customDomainName}'
 @description('Value for the asuid.<customDomainName> TXT record.')
 output customDomainVerificationId string = appService.outputs.customDomainVerificationId
-output opsStorageAccountName string = opsStorage.outputs.storageAccountName

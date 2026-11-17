@@ -292,7 +292,9 @@ ENV CALIBRE_CONFIG_DIR=/config/.config/calibre
 WORKDIR /config
 # The default port CWA listens on. Can be overridden with the CWA_PORT_OVERRIDE environment variable.
 EXPOSE 8083
-VOLUME /config
+# /config is intentionally not declared as a VOLUME: on Azure App Service it is
+# replaced at startup by a symlink to persistent /home storage, which an
+# anonymous volume mountpoint would prevent. Bind-mount /config as usual elsewhere.
 VOLUME /cwa-book-ingest
 VOLUME /calibre-library
 

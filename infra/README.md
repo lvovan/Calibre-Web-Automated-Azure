@@ -1,17 +1,16 @@
 # Deploying Calibre-Web Automated on Azure App Service
 
-This fork can run CWA as a **Web App for Containers** on Azure App Service, with all persistent data on **Azure Files (SMB)** shares. Infrastructure is defined in Bicep (`infra/`), and deployment is automated with GitHub Actions (`.github/workflows/azure-deploy.yml`).
+This fork can run CWA as a **Web App for Containers** on Azure App Service. The library lives on an **Azure Files (SMB)** share in your storage account; CWA's own configuration lives on the App Service plan's built-in persistent `/home` storage. Infrastructure is defined in Bicep (`infra/`), and deployment is automated with GitHub Actions (`.github/workflows/azure-deploy.yml`).
 
 ## Architecture
 
 ```
 Resource group (default: rg-cwa, francecentral)
-├─ App Service plan        Linux B1, 1 instance
+├─ App Service plan        Linux B1, 1 instance (includes 10 GB persistent /home storage)
 ├─ Web App for Containers  ghcr.io/<owner>/<repo>:sha-<commit>
 │    /calibre-library ← SMB mount: external storage account, share "library"
-│    /config          ← SMB mount: ops storage account, share "config"
+│    /config          → symlink to /home/config (App Service persistent storage)
 │    /cwa-book-ingest and /tmp/cwa_conversion on local container disk (transient)
-├─ Storage account (ops)   Standard_LRS, share "config" (5 GiB), 7-day share soft delete
 ├─ Log Analytics           30-day retention, 0.1 GB/day cap
 └─ Application Insights    workspace-based
 
@@ -22,32 +21,34 @@ External storage account (yours, not managed by these templates)
 | Path | Storage | Contents |
 |---|---|---|
 | `/calibre-library` | External account, Azure Files | Calibre library, including `metadata.db` |
-| `/config` | Ops account in the app's resource group | `app.db` (users, settings), `cwa.db` (stats), logs, Calibre plugins |
+| `/config` → `/home/config` | App Service persistent storage (`WEBSITES_ENABLE_APP_SERVICE_STORAGE=true`) | `app.db` (users, settings), `cwa.db` (stats), logs, Calibre plugins |
 | `/cwa-book-ingest` | Local container disk | Web UI uploads waiting to be imported (seconds) |
 | `/tmp/cwa_conversion` | Local container disk | Ingest staging scratch files (CWA uses this folder for staging even when conversion is off) |
 
 Books are added through the **web UI upload** button; the ingest folder isn't exposed as a share.
 
+At startup, the `init-cwa-persistent-config` s6 service runs before the base image initialization. On App Service with `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true`, it creates `/home/config`, seeds it from the image on first start, and replaces `/config` with a symlink to it. Elsewhere it does nothing, so bind-mounting `/config` works as usual. `/home` counts toward the plan's storage quota (10 GB on B1), shared with the plan's other apps; `/config` typically stays well under 1 GB.
+
 ### Azure-specific settings (set by Bicep)
 
 | App setting | Value | Why |
 |---|---|---|
-| `NETWORK_SHARE_MODE` | `true` | Disables SQLite WAL and `chown`, and uses polling watchers. All are required on SMB. |
-| `CWA_TMP_CONVERSION_DIR` | `/tmp/cwa_conversion` | Keeps ingest staging I/O off the `/config` share. |
+| `NETWORK_SHARE_MODE` | `true` | Disables SQLite WAL and `chown`, and uses polling watchers. All are required on SMB and on `/home`, which is also network storage. |
+| `CWA_TMP_CONVERSION_DIR` | `/tmp/cwa_conversion` | Keeps ingest staging I/O on local disk instead of persistent `/config`. |
 | `CWA_DISABLE_AUTO_CONVERT` | `true` | New installs import uploads in their original format, with no automatic conversion to EPUB. Can be re-enabled in CWA Settings. |
 | `CWA_DISABLE_PROCESSED_BACKUPS` | `true` | New installs don't archive processed originals to `/config/processed_books`. Can be re-enabled in CWA Settings. |
 | `TRUSTED_PROXY_COUNT` | `1` | The App Service front end is the only proxy. |
 | `WEBSITES_PORT` | `8083` | CWA listen port. |
-| `WEBSITES_ENABLE_APP_SERVICE_STORAGE` | `false` | All persistence is on the explicit Azure Files mounts. |
+| `WEBSITES_ENABLE_APP_SERVICE_STORAGE` | `true` | Mounts persistent `/home`, which holds `/config`. |
 
-On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/calibre-library` or `/config` isn't a mount. This prevents a library from being silently created on ephemeral disk.
+On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/calibre-library` isn't a mount, or if `/config` is neither a mount nor on persistent `/home`. This prevents data from being silently written to ephemeral disk.
 
 ## Prerequisites
 
 - Azure CLI ≥ 2.53 (`az login`). You need Owner or User Access Administrator on the subscription or resource group for the bootstrap, plus permission to create Entra app registrations.
 - GitHub CLI (`gh auth login`), optional, to let the bootstrap set repository secrets.
 - An existing storage account (StorageV2, Standard) with **shared key access enabled** and an Azure Files share for the library. The account should be in the **same region** as the app; latency matters for SQLite. Use a **dedicated** account: the key grants full access to it.
-- A subscription where storage accounts may keep **shared key access** and **public network access** enabled. App Service storage mounts only support account keys. Policies that force `allowSharedKeyAccess=false` or `publicNetworkAccess=Disabled`, common in corporate tenants, make the mounts fail with `BYOSFailure ... Permission was denied` in the container log. Request a policy exemption for both storage accounts, or use another subscription.
+- A subscription where storage accounts may keep **shared key access** and **public network access** enabled. App Service storage mounts only support account keys. Policies that force `allowSharedKeyAccess=false` or `publicNetworkAccess=Disabled`, common in corporate tenants, make the mounts fail with `BYOSFailure ... Permission was denied` in the container log. Request a policy exemption for the content storage account, or use another subscription. (`/config` uses App Service's built-in storage, so it isn't affected.)
 
 Create the library share if needed:
 
@@ -127,13 +128,12 @@ The deployment binds the hostname, creates an App Service managed certificate (f
 
 | Resource | Monthly |
 |---|---|
-| App Service plan B1 Linux | ~€12 |
-| Ops storage (config share, < 1 GiB, TransactionOptimized) | < €0.50 |
+| App Service plan B1 Linux (includes 10 GB `/home` storage for `/config`) | ~€12 |
 | Library share (Hot) | ~€0.03/GiB + transactions |
 | Log Analytics / App Insights | €0 within the 5 GB/month free allowance; hard cap 0.1 GB/day |
 | Managed certificate, GHCR | Free |
 
-The polling watchers (`NETWORK_SHARE_MODE`) generate a steady trickle of SMB transactions on the shares, typically well under €1/month.
+The polling watchers (`NETWORK_SHARE_MODE`) generate a steady trickle of SMB transactions on the library share, typically well under €1/month.
 
 **Why not the Free (F1) tier?** F1 has no Always On (the app unloads after 20 minutes idle, stopping CWA's background services), a 60 CPU-minute daily quota, and 1 GB of RAM. Imports still run Calibre (`calibredb`, `ebook-meta`) even with conversions disabled. B1 is the cheapest workable tier.
 
@@ -141,7 +141,7 @@ The polling watchers (`NETWORK_SHARE_MODE`) generate a steady trickle of SMB tra
 
 - **Log stream**: Portal → Web App → *Log stream* (container stdout).
 - **Log Analytics**: `AppServiceConsoleLogs`, `AppServiceHTTPLogs` and `AppServicePlatformLogs` tables.
-- **CWA Logs** page in the UI, and `/config/log_archive` on the config share.
+- **CWA Logs** page in the UI, and `/home/config/log_archive` (browse it with Kudu: `https://<app>.scm.azurewebsites.net/newui` → *File Manager*).
 
 To change the caps, use the `logDailyQuotaGb` and `logRetentionInDays` parameters. Once the daily cap is reached, ingestion stops until the next day.
 
@@ -153,25 +153,30 @@ To change the caps, use the `logDailyQuotaGb` and `logRetentionInDays` parameter
 2. Re-run the workflow. The mount now uses key2.
 3. Regenerate key1: `az storage account keys renew -n <account> -g <rg> --key key1`.
 
-Next time, swap roles. The ops account key is read at deployment time, so after rotating it, just redeploy.
+Next time, swap roles.
 
 ### Backup and restore
 
-- Share soft delete is enabled on the ops account (7 days). Enable it on the external content account yourself. Soft delete protects against **share deletion**, not file corruption.
-- For point-in-time protection, take a share snapshot before risky operations:
+- **Library:** enable share soft delete on the external content account yourself. Soft delete protects against **share deletion**, not file corruption. For point-in-time protection, take a share snapshot before risky operations:
   `az storage share snapshot --account-name <account> --name library` (you pay only for changed data).
-- To copy data out: `azcopy copy "https://<account>.file.core.windows.net/library?<sas>" ./backup --recursive`, or use Azure Storage Explorer.
+  To copy data out: `azcopy copy "https://<account>.file.core.windows.net/library?<sas>" ./backup --recursive`, or use Azure Storage Explorer.
+- **`/config`:** download it as a zip through Kudu (needs an account with Contributor or higher on the app):
+  ```bash
+  curl -fSL -H "Authorization: Bearer $(az account get-access-token --query accessToken -o tsv)" \
+    -o cwa-config.zip https://<app>.scm.azurewebsites.net/api/zip/home/config/
+  ```
+  `/home` survives restarts, redeployments and image changes, but it's deleted with the web app.
 
 ### Migrating an existing library later
 
 1. Stop the web app.
-2. Upload the library (with `metadata.db`) to the `library` share, and optionally an existing CWA `/config` (`app.db`, `cwa.db`) to the `config` share. Use `azcopy` or Storage Explorer.
+2. Upload the library (with `metadata.db`) to the `library` share with `azcopy` or Storage Explorer. To bring an existing CWA `/config` (`app.db`, `cwa.db`), upload it to `/home/config` with Kudu's *File Manager*, or `PUT https://<app>.scm.azurewebsites.net/api/zip/home/config/` with a zip.
 3. Start the web app.
 
 ## Limitations
 
 - **Single instance only.** `metadata.db`, `app.db` and `cwa.db` are SQLite. Never scale out the plan; it's pinned to one instance.
-- **SQLite on SMB.** WAL is disabled and access is serialized, but a hard crash during a write can still corrupt a database. Keep share snapshots for anything you can't lose.
+- **SQLite on network storage.** WAL is disabled and access is serialized, but a hard crash during a write can still corrupt a database. Keep share snapshots and `/config` backups for anything you can't lose.
 - **Performance.** Every library query and cover read goes over SMB. Large library pages are slower than on local disk.
 - **In-flight uploads.** Uploads waiting in the local ingest folder are lost if the app restarts before they are imported.
 - **Account keys.** App Service SMB mounts require the storage account key; SAS and managed identity aren't supported for mounts.
@@ -181,7 +186,7 @@ Next time, swap roles. The ops account key is read at deployment time, so after 
 
 Run through this once after the first deployment:
 
-- [ ] `/health` returns 200, and the log stream shows `[cwa-init][azure] /calibre-library is mounted` and `/config is mounted`.
+- [ ] `/health` returns 200, and the log stream shows `[cwa-persistent-config] /config -> /home/config`, `[cwa-init][azure] /calibre-library is mounted` and `/config is stored on persistent App Service storage`.
 - [ ] A new library is created on the `library` share (`metadata.db` visible in the portal).
 - [ ] Upload an EPUB through the web UI; it appears in the library within a minute.
 - [ ] Edit metadata and the cover; the change persists after a page reload.
@@ -198,4 +203,6 @@ Azure-specific changes are isolated so upstream releases merge cleanly:
 - Code changes, all inert unless the environment variable is set:
   - `CWA_TMP_CONVERSION_DIR` in `scripts/ingest_processor.py`, `scripts/convert_library.py` and `cps/cwa_functions.py`
   - `CWA_DISABLE_PROCESSED_BACKUPS` and `CWA_DISABLE_AUTO_CONVERT` in `scripts/cwa_db.py`
-  - the App Service mount check and local-ingest ownership in `root/etc/s6-overlay/s6-rc.d/cwa-init/run`
+  - `init-cwa-persistent-config` s6 oneshot (runs before `init-migrations`; active only on App Service with `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true`)
+  - the App Service storage check and local-ingest ownership in `root/etc/s6-overlay/s6-rc.d/cwa-init/run`
+- `Dockerfile` doesn't declare `VOLUME /config`: an anonymous volume would prevent the `/config` → `/home/config` symlink. Keep this when merging upstream Dockerfile changes.

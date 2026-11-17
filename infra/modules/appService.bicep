@@ -28,12 +28,6 @@ param contentStorageAccountKey string
 @description('Azure Files share (in the external account) mounted at /calibre-library.')
 param libraryShareName string
 
-@description('Ops storage account (same resource group) holding the /config share.')
-param opsStorageAccountName string
-
-@description('Azure Files share (in the ops account) mounted at /config.')
-param configShareName string
-
 @description('Log Analytics workspace receiving App Service diagnostic logs.')
 param logAnalyticsWorkspaceId string
 
@@ -45,10 +39,6 @@ param appInsightsConnectionString string
 param hardcoverToken string = ''
 
 param tags object = {}
-
-resource opsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: opsStorageAccountName
-}
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: 'asp-${baseName}'
@@ -66,18 +56,19 @@ resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
 
 var baseAppSettings = [
   { name: 'WEBSITES_PORT', value: '8083' }
-  { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'false' }
-  // First start initializes databases on the SMB share; allow generous startup time
+  // Persistent /home storage holds /config (app.db, cwa.db, logs); see init-cwa-persistent-config
+  { name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE', value: 'true' }
+  // First start initializes databases on network storage; allow generous startup time
   { name: 'WEBSITES_CONTAINER_START_TIME_LIMIT', value: '900' }
   { name: 'DOCKER_REGISTRY_SERVER_URL', value: 'https://ghcr.io' }
   { name: 'PUID', value: '1000' }
   { name: 'PGID', value: '1000' }
   { name: 'TZ', value: timezone }
-  // Azure Files (SMB): disables WAL + chown and uses polling watchers
+  // /home and Azure Files are network storage: disables WAL + chown and uses polling watchers
   { name: 'NETWORK_SHARE_MODE', value: 'true' }
   // App Service front end is the only proxy in front of the container
   { name: 'TRUSTED_PROXY_COUNT', value: '1' }
-  // Keep ingest staging scratch I/O on local container disk instead of the /config share
+  // Keep ingest staging scratch I/O on local container disk instead of persistent /config
   { name: 'CWA_TMP_CONVERSION_DIR', value: '/tmp/cwa_conversion' }
   // Don't archive processed originals to /config/processed_books (new installs only)
   { name: 'CWA_DISABLE_PROCESSED_BACKUPS', value: 'true' }
@@ -89,17 +80,6 @@ var baseAppSettings = [
 var optionalAppSettings = empty(hardcoverToken) ? [] : [
   { name: 'HARDCOVER_TOKEN', value: hardcoverToken }
 ]
-
-var configMount = {
-  config: {
-    type: 'AzureFiles'
-    protocol: 'Smb'
-    accountName: opsStorage.name
-    shareName: configShareName
-    mountPath: '/config'
-    accessKey: opsStorage.listKeys().keys[0].value
-  }
-}
 
 // Omitted until the external content storage is configured
 var libraryMount = empty(contentStorageAccountName) ? {} : {
@@ -133,7 +113,7 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
       scmMinTlsVersion: '1.2'
       ftpsState: 'Disabled'
       appSettings: concat(baseAppSettings, optionalAppSettings)
-      azureStorageAccounts: union(libraryMount, configMount)
+      azureStorageAccounts: libraryMount
     }
   }
 }

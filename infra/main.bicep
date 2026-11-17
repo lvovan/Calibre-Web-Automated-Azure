@@ -82,6 +82,7 @@ module appService 'modules/appService.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     hardcoverToken: hardcoverToken
+    customDomainName: customDomainName
     tags: tags
   }
 }

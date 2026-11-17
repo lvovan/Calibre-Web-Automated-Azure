@@ -187,6 +187,7 @@ Pluggable providers in `cps/metadata_provider/`:
 - `HARDCOVER_TOKEN`: API key for Hardcover metadata provider
 - `COOKIE_PREFIX`: Custom prefix for session cookies
 - `TRUSTED_PROXY_COUNT`: Number of proxies to trust for X-Forwarded-* headers (default: 1, use 2+ for CF Tunnel + reverse proxy)
+- `CWA_ALLOWED_HOSTS`: Comma-separated Host allowlist (`cps/host_allowlist.py`); other hosts get 404 except `/health` and localhost. Unset = disabled
 
 ## Common Pitfalls
 1. **Don't import SQLite on main thread**: Always use `init_db_thread()` in background tasks

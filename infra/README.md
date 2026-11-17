@@ -40,6 +40,7 @@ At startup, the `init-cwa-persistent-config` s6 service runs before the base ima
 | `TRUSTED_PROXY_COUNT` | `1` | The App Service front end is the only proxy. |
 | `WEBSITES_PORT` | `8083` | CWA listen port. |
 | `WEBSITES_ENABLE_APP_SERVICE_STORAGE` | `true` | Mounts persistent `/home`, which holds `/config`. |
+| `CWA_ALLOWED_HOSTS` | `CUSTOM_DOMAIN_NAME` (only when set) | Returns 404 for any other `Host`, which blocks the default `*.azurewebsites.net` hostname. See step 4. |
 
 On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/calibre-library` isn't an Azure Files (network) mount, or if `/config` is neither a mount nor on persistent `/home`. This prevents data from being silently written to ephemeral disk, including the anonymous volume Docker creates for `/calibre-library` when no share is mounted.
 
@@ -134,6 +135,13 @@ Use a subdomain, e.g. `books.example.com`.
 3. Set the GitHub variable `CUSTOM_DOMAIN_NAME=books.example.com` and re-run the workflow.
 
 The deployment binds the hostname, creates an App Service managed certificate (free, renewed automatically), then enables SNI TLS. Each deployment re-applies the binding, which may cause a brief TLS hiccup on that hostname during the restart.
+
+Setting `CUSTOM_DOMAIN_NAME` also sets `CWA_ALLOWED_HOSTS`, which makes the app (`cps/host_allowlist.py`) return a plain 404 for every request whose `Host` header is not the custom domain. The default `app-cwa-<suffix>.azurewebsites.net` hostname stops serving the app at no extra cost.
+- `/health` stays reachable on any host, for the App Service health check and the deploy workflow.
+- `localhost` stays allowed, for the container `HEALTHCHECK`.
+- The check uses the raw `Host` header, which the App Service front end routes on. A client-supplied `X-Forwarded-Host` can't bypass it.
+- Kudu (`*.scm.azurewebsites.net`) is a separate site, protected by Entra ID, and isn't affected.
+- `CUSTOM_DOMAIN_NAME` sets `CWA_ALLOWED_HOSTS` to that single domain. You can set a comma-separated list on the app instead, but each deployment resets it to `CUSTOM_DOMAIN_NAME`.
 
 ## Cost (France Central, approximate)
 

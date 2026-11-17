@@ -20,6 +20,7 @@ from . import logger
 from . import constants
 from .cli import CliParameter
 from .reverseproxy import ReverseProxied
+from . import host_allowlist
 from .server import WebServer
 from .dep_check import dependency_check
 from .updater import Updater
@@ -192,6 +193,10 @@ def create_app():
                          res['target'],
                          res['found']))
     app.wsgi_app = ReverseProxied(app.wsgi_app)
+    # Outermost so it sees the raw Host header (see host_allowlist.py)
+    app.wsgi_app = host_allowlist.wrap(app.wsgi_app)
+    if os.environ.get(host_allowlist.ENV_VAR):
+        log.info('Restricting access to hosts: %s', os.environ.get(host_allowlist.ENV_VAR))
 
     if os.environ.get('FLASK_DEBUG'):
         cache_buster.init_cache_busting(app)

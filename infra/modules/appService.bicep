@@ -38,6 +38,9 @@ param appInsightsConnectionString string
 @secure()
 param hardcoverToken string = ''
 
+@description('Custom domain. When set, requests on any other host (e.g. *.azurewebsites.net) get a 404, except /health.')
+param customDomainName string = ''
+
 param tags object = {}
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
@@ -77,9 +80,12 @@ var baseAppSettings = [
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
 ]
 
-var optionalAppSettings = empty(hardcoverToken) ? [] : [
+var optionalAppSettings = concat(empty(hardcoverToken) ? [] : [
   { name: 'HARDCOVER_TOKEN', value: hardcoverToken }
-]
+], empty(customDomainName) ? [] : [
+  // Blocks the default *.azurewebsites.net hostname (cps/host_allowlist.py)
+  { name: 'CWA_ALLOWED_HOSTS', value: customDomainName }
+])
 
 // Omitted until the external content storage is configured
 var libraryMount = empty(contentStorageAccountName) ? {} : {

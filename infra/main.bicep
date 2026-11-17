@@ -67,18 +67,6 @@ module monitoring 'modules/monitoring.bicep' = {
   }
 }
 
-module keyVault 'modules/keyVault.bicep' = {
-  name: 'keyVault'
-  params: {
-    location: location
-    keyVaultName: take('kv-${baseName}', 24)
-    identityName: 'id-${baseName}'
-    contentStorageConfigured: !empty(contentStorageAccountName)
-    contentStorageAccountKey: contentStorageAccountKey
-    tags: tags
-  }
-}
-
 module appService 'modules/appService.bicep' = {
   name: 'appService'
   params: {
@@ -89,8 +77,7 @@ module appService 'modules/appService.bicep' = {
     containerImage: containerImage
     timezone: timezone
     contentStorageAccountName: contentStorageAccountName
-    contentKeyReference: keyVault.outputs.contentKeyReference
-    identityId: keyVault.outputs.identityId
+    contentStorageAccountKey: contentStorageAccountKey
     libraryShareName: libraryShareName
     logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
@@ -115,4 +102,3 @@ output defaultUrl string = 'https://${appService.outputs.defaultHostName}'
 output customUrl string = empty(customDomainName) ? '' : 'https://${customDomainName}'
 @description('Value for the asuid.<customDomainName> TXT record.')
 output customDomainVerificationId string = appService.outputs.customDomainVerificationId
-output keyVaultName string = keyVault.outputs.keyVaultName

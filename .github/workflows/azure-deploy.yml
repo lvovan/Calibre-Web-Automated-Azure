@@ -113,6 +113,19 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # App Service starts the new container before stopping the old one. Both would then write
+      # the SQLite databases on /home (SMB) at the same time, which corrupts them: stop the app
+      # first so that only one container ever has them open.
+      - name: Stop the app before deploying
+        id: stop
+        run: |
+          app=$(az webapp list -g "${{ vars.AZURE_RESOURCE_GROUP }}" --query "[0].name" -o tsv)
+          if [ -n "$app" ]; then
+            az webapp stop -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n "$app" -o none
+            echo "app=${app}" >> "$GITHUB_OUTPUT"
+            echo "Stopped ${app}"
+          fi
+
       - name: Deploy Bicep
         id: deploy
         env:
@@ -157,6 +170,11 @@ jobs:
             echo "- Custom URL: $(jq -r .customUrl.value <<<"$outputs")"
             echo "- Custom domain verification ID (asuid TXT): $(jq -r .customDomainVerificationId.value <<<"$outputs")"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Also runs when the deployment failed, so the previous version comes back up
+      - name: Start the app
+        if: always() && steps.stop.outputs.app != ''
+        run: az webapp start -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n "${{ steps.stop.outputs.app }}" -o none
 
       - name: Wait for /health
         if: steps.deploy.outputs.content_configured == 'true'

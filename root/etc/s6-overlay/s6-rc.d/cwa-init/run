@@ -208,6 +208,16 @@ else
 fi
 
 #------------------------------------------------------------------------------------------------------------------------
+#  Check the /config databases for corruption (e.g. two containers writing to them during an
+#  App Service deployment overlap) and repair them losslessly when possible. Databases that
+#  cannot be repaired are reported in /config/.cwa_db_health.json, shown as a banner in the UI.
+#------------------------------------------------------------------------------------------------------------------------
+
+echo "[cwa-init] Checking database integrity..."
+s6-setuidgid abc python3 /app/calibre-web-automated/scripts/db_integrity.py /config/app.db /config/cwa.db \
+    || echo "[cwa-init] WARNING: a database is corrupted and could not be repaired automatically (see above)."
+
+#------------------------------------------------------------------------------------------------------------------------
 #  Ensure correct binary paths in app.db
 #------------------------------------------------------------------------------------------------------------------------
 

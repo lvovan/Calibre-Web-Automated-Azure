@@ -93,6 +93,8 @@ def main():
         app.register_blueprint(readingservices_userstorage)
     if oauth_available:
         app.register_blueprint(oauth)
+    from .db_health import inject_db_health
+    app.context_processor(inject_db_health)
     start_onedrive_queue()
     success = web_server.start()
     sys.exit(0 if success else 1)

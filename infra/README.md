@@ -216,6 +216,11 @@ Next time, swap roles.
 
 - **Single instance only.** `metadata.db`, `app.db` and `cwa.db` are SQLite. Never scale out the plan; it's pinned to one instance.
 - **SQLite on network storage.** WAL is disabled and access is serialized, but a hard crash during a write can still corrupt a database. Keep share snapshots and `/config` backups for anything you can't lose.
+- **No overlapping containers.** On a restart or deployment, App Service starts the new container before it stops the old one. If both write `app.db`/`cwa.db` on `/home` at the same time, the databases can be corrupted. The deploy workflow therefore stops the app before deploying and starts it afterwards, which costs 1–2 minutes of downtime per deployment. For the same reason, prefer *Stop* then *Start* over *Restart* in the portal.
+- **Startup integrity check.** At every start, `cwa-init` runs `scripts/db_integrity.py` on `app.db` and `cwa.db`:
+  - A corrupted database is rebuilt with `VACUUM INTO`. The rebuilt copy is used only if it passes `integrity_check` with the same row counts, and the original is kept as `<db>.corrupt-<timestamp>`.
+  - A database that can't be repaired without data loss is left unchanged, and every page shows a red banner until an administrator restores it from a backup.
+  - The latest result is in `/config/.cwa_db_health.json`.
 - **Performance.** Every library query and cover read goes over SMB. Large library pages are slower than on local disk.
 - **In-flight uploads.** Uploads waiting in the local ingest folder are lost if the app restarts before they are imported.
 - **Account keys.** App Service SMB mounts require the storage account key; SAS and managed identity aren't supported for mounts.

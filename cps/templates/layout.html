@@ -199,6 +199,14 @@
       </div>
     </div>
 
+    {% if corrupted_databases %}
+      <div class="row-fluid text-center">
+        <div id="db_corruption_banner" class="alert alert-danger" role="alert">
+          {{_('Database corruption detected (%(dbs)s) and it could not be repaired automatically. Some features may fail or lose changes until an administrator restores the database (see the CWA logs).', dbs=corrupted_databases|join(', '))}}
+        </div>
+      </div>
+    {% endif %}
+
     {% for message in get_flashed_messages(with_categories=True) %}
       {%if message[0] == "error" %}
       <div class="row-fluid text-center" >

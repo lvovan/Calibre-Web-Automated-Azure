@@ -23,6 +23,62 @@
 #cwaClose:hover,
 #cwaClose:focus {
   background-color: #444;
-  border-color: yellow;
-  color: yellow;
+  border-color: hsla(0, 0%, 100%, .35);
+  color: #fff;
+}
+
+/* Replace kthoom's yellow/red accents with CWA's muted palette
+   (translucent white on dark, as used by the CWA scrollbars). */
+button:focus,
+.menuItem:focus,
+.readingStackBook.current {
+  outline: solid 2px hsla(0, 0%, 100%, .3);
+}
+
+.menuItem:focus,
+.readingStackBook.current {
+  background-color: hsla(0, 0%, 100%, .12);
+}
+
+.navbutton:hover:not([disabled]), .navbutton:focus,
+.metadataButton:hover {
+  border-color: hsla(0, 0%, 100%, .35);
+  color: #fff;
+}
+
+.menuButton:hover, .menuButton:focus {
+  border-color: hsla(0, 0%, 100%, .35);
+  color: #fff;
+}
+
+ul.menuItems,
+#metadataViewer.opened {
+  border-color: hsla(0, 0%, 100%, .2);
+}
+
+.menuItem,
+#metadataViewer.opened,
+#helpOverlay {
+  color: #ddd;
+}
+
+.menuSeparator,
+.metadataTable tr {
+  border-color: hsla(0, 0%, 100%, .15);
+}
+
+.trayContents {
+  scrollbar-color: hsla(0, 0%, 100%, .2) transparent;
+}
+
+.trayContents::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+.trayContents::-webkit-scrollbar-thumb {
+  background-color: hsla(0, 0%, 100%, .2);
+}
+
+.trayContents::-webkit-scrollbar-thumb:hover {
+  background-color: hsla(0, 0%, 100%, .3);
 }

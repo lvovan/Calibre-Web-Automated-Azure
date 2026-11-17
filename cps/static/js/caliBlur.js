@@ -902,7 +902,10 @@ $(function() {
                 
                 // Send to eReader area (bottom-right)
                 var sendEReaderX = linkWidth - margin - (actionSize / 2);
-                var sendEReaderY = linkHeight - margin - (actionSize / 2);
+                // CWA: moved to top-right when the cover delete icon owns the bottom-right corner
+                var sendEReaderY = $link.closest('.cover').hasClass('has-cover-delete')
+                    ? margin + (actionSize / 2)
+                    : linkHeight - margin - (actionSize / 2);
                 var sendEReaderRadius = actionSize / 2;
                 
                 // Edit metadata button (center-bottom)
@@ -978,7 +981,10 @@ $(function() {
                 var readToggleRadius = actionSize / 2;
                 
                 var sendEReaderX = linkWidth - margin - (actionSize / 2);
-                var sendEReaderY = linkHeight - margin - (actionSize / 2);
+                // CWA: moved to top-right when the cover delete icon owns the bottom-right corner
+                var sendEReaderY = $link.closest('.cover').hasClass('has-cover-delete')
+                    ? margin + (actionSize / 2)
+                    : linkHeight - margin - (actionSize / 2);
                 var sendEReaderRadius = actionSize / 2;
                 
                 // Edit metadata button (center-bottom)

@@ -28,6 +28,10 @@
     {% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
     <link href="{{ url_for('static', filename='css/duplicates-notifications.css') }}" rel="stylesheet" media="screen">
     {% endif %}
+    {% set cover_delete_enabled = current_user.is_authenticated and current_user.role_edit() and current_user.role_delete_books() %}
+    {% if cover_delete_enabled %}
+    <link href="{{ url_for('static', filename='css/cover-delete.css') }}" rel="stylesheet" media="screen">
+    {% endif %}
     <script>
       let checkMessagesInterval = null; // Store interval ID
 
@@ -387,6 +391,35 @@
       </div>
     </div>
     {% block modal %}{% endblock %}
+    {% if cover_delete_enabled %}
+    <div class="modal fade" id="coverDeleteModal" role="dialog" aria-labelledby="coverDeleteLabel"
+         data-label="{{ _('Delete') }}" data-error="{{ _('Error deleting book') }}">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-danger text-center">
+            <span id="coverDeleteLabel">{{ _('Are you really sure?') }}</span>
+          </div>
+          <div class="modal-body text-center">
+            <p class="cover-delete-title"></p>
+            <p>
+              <span>{{ _('This book will be permanently erased from database') }}</span>
+              <span>{{ _('and hard disk') }}</span>
+            </p>
+            {% if config.config_kobo_sync %}
+            <p>
+              <span>{{ _('Important Kobo Note: deleted books will remain on any paired Kobo device.') }}</span>
+              <span>{{ _('Books must first be archived and the device synced before a book can safely be deleted.') }}</span>
+            </p>
+            {% endif %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-danger" id="coverDeleteConfirm" data-dismiss="modal">{{ _('Delete') }}</button>
+            <button type="button" class="btn btn-default" data-dismiss="modal">{{ _('Cancel') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
     <script src="{{ url_for('static', filename='js/libs/jquery.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/libs/bootstrap.min.js') }}"></script>
@@ -419,6 +452,9 @@
         window.cwaUserData.canEditBooks = {{ 'true' if current_user.role_edit() else 'false' }};
       </script>
       <script src="{{ url_for('static', filename='js/caliBlur.js') }}"></script>
+    {% endif %}
+    {% if cover_delete_enabled %}
+    <script src="{{ url_for('static', filename='js/cover-delete.js') }}"></script>
     {% endif %}
     {% block js %}{% endblock %}
     {% if current_user.is_authenticated %}

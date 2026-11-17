@@ -22,5 +22,7 @@ CWA-specific changes are marked with `CWA:` comments:
 - `common/helpers.js`: URL rewriting can be disabled through the `SERIALIZE_PARAMS` config key.
 - `metadata/metadata-viewer.js`: metadata editing is disabled for page-list books (no archive).
 - `cwa-main.js` / `cwa.css`: CWA entry point (bookmarks, prefetching, fallback, UI trimming).
+  `cwa.css` also replaces kthoom's yellow/red accents with CWA's muted palette; the progress
+  bar SVG colors are set in `cps/templates/readcbr.html`.
 
 Server side: `cps/comic_pages.py` lists and extracts CBZ/CBT/CBR pages; routes live in `cps/web.py`.

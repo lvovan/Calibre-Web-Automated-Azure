@@ -15,7 +15,7 @@ from babel.units import format_unit
 from . import logger
 from .render_template import render_title_template
 from .services.worker import WorkerThread, STAT_WAITING, STAT_FAIL, STAT_STARTED, STAT_FINISH_SUCCESS, STAT_ENDED, \
-    STAT_CANCELLED
+    STAT_CANCELLED, can_cancel
 from .usermanagement import user_login_required
 
 tasks = Blueprint('tasks', __name__)
@@ -72,7 +72,7 @@ def render_task_status(tasklist):
             # Hidden fields
             ret['task_id'] = task.id
             ret['stat'] = task.stat
-            ret['is_cancellable'] = task.is_cancellable
+            ret['is_cancellable'] = can_cancel(task)
             ret['error'] = task.error
 
             rendered_tasklist.append(ret)

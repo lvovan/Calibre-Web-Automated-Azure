@@ -120,6 +120,93 @@ def test_existing_marker_reports_already_in_library(upload, tmp_path, monkeypatc
     task = module.TaskUpload("msg", "b", ingest_path=path)
     assert task.stat == worker.STAT_FINISH_SUCCESS
     assert "already in library" in task.message
+    assert not list(outcomes.iterdir())  # consumed by the task
+
+    (outcomes / (stem[:150 - len(".epub")] + ".epub")).write_text("existing")
     assert module.ingest_outcome(path, consume_marker=True) == module.OUTCOME_EXISTING
     assert not list(outcomes.iterdir())
     assert module.ingest_outcome(path) == module.OUTCOME_FAILED  # no marker, no cwa_import row
+
+
+def test_imported_marker_shows_escaped_book_title(upload, tmp_path, monkeypatch):
+    module, worker = upload
+    outcomes = tmp_path / "outcomes"
+    outcomes.mkdir()
+    monkeypatch.setattr(module, "INGEST_OUTCOME_DIR", str(outcomes))
+    (outcomes / "new_1_book.epub").write_text("imported\nDune <Deluxe>")
+    task = module.TaskUpload("msg", "book.epub", ingest_path=str(tmp_path / "new_1_book.epub"))
+    assert task.stat == worker.STAT_FINISH_SUCCESS
+    assert task.message == 'book.epub → "Dune &lt;Deluxe&gt;" (imported)'
+
+
+@pytest.fixture
+def cancel_dir(upload, tmp_path, monkeypatch):
+    module, _ = upload
+    folder = tmp_path / "cancel"
+    monkeypatch.setattr(module, "INGEST_CANCEL_DIR", str(folder))
+    monkeypatch.setattr(module, "INGEST_OUTCOME_DIR", str(tmp_path / "outcomes"))
+    return folder
+
+
+def test_cancel_before_ingest_starts_removes_queued_file(upload, tmp_path, cancel_dir):
+    module, worker = upload
+    book = tmp_path / "new_1_book.epub"
+    book.write_text("x")
+    Path(str(book) + ".cwa.json").write_text("{}")
+    task = module.TaskUpload("msg", "book.epub", ingest_path=str(book))
+    assert worker.can_cancel(task)
+
+    task.stat = worker.STAT_ENDED
+    assert task.stat == worker.STAT_CANCELLED
+    assert "cancelled" in task.message and task.end_time is not None
+    assert not book.exists() and not Path(str(book) + ".cwa.json").exists()
+    assert (cancel_dir / "new_1_book.epub").exists()
+
+
+def test_cancel_during_ingest_waits_for_ingest_processor(upload, tmp_path, cancel_dir):
+    module, worker = upload
+    book = tmp_path / "new_1_book.epub"
+    book.write_text("x")
+    (tmp_path / "status").write_text("processing:new_1_book.epub:2025")
+    task = module.TaskUpload("msg", "book.epub", ingest_path=str(book))
+
+    task.stat = worker.STAT_ENDED
+    assert book.exists()  # the ingest service owns it now
+    assert (cancel_dir / "new_1_book.epub").exists()
+    assert task.stat == worker.STAT_STARTED and "cancelling" in task.message
+    assert not worker.can_cancel(task)
+
+    book.unlink()
+    (tmp_path / "outcomes").mkdir()
+    (tmp_path / "outcomes" / "new_1_book.epub").write_text("cancelled")
+    assert task.stat == worker.STAT_CANCELLED
+
+
+def test_end_task_checks_owner_and_cancels_waiting_tasks(upload, monkeypatch):
+    module, worker = upload
+
+    class Waiting(worker.CalibreTask):
+        def run(self, worker_thread):
+            pass
+
+        @property
+        def name(self):
+            return "w"
+
+        @property
+        def is_cancellable(self):
+            return False
+
+    task = Waiting("msg")
+    queued = worker.QueuedTask(num=1, user="alice", added=None, task=task, hidden=False)
+    ins = types.SimpleNamespace(tasks=[queued])
+    ins.get_instance = lambda: ins
+    end_task = lambda task_id, user: worker.WorkerThread.end_task(ins, task_id, user)
+
+    assert end_task(task.id, user="bob") is False
+    assert task.stat == worker.STAT_WAITING
+    assert end_task(task.id, user="alice") is True
+    assert task.stat == worker.STAT_CANCELLED and task.end_time is not None
+
+    task._handleSuccess()  # a late completion must not overwrite the cancellation
+    assert task.stat == worker.STAT_CANCELLED

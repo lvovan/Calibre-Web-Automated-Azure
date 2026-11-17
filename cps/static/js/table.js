@@ -195,6 +195,9 @@ $(function() {
             dataType: "json",
             url: getPath() + "/ajax/canceltask",
             data: JSON.stringify({"task_id": taskId}),
+            success: function () {
+                $("#tasktable").bootstrapTable("refresh");
+            }
         });
     });
     //triggered when modal is about to be shown
@@ -1071,11 +1074,10 @@ function UserActions (value, row) {
 function TaskActions (value, row) {
     var cancellableStats = [0, 2];
     if (row.task_id && row.is_cancellable && cancellableStats.includes(row.stat)) {
-        return [
-            "<div class=\"danger task-cancel\" data-toggle=\"modal\" data-target=\"#cancelTaskModal\" data-task-id=\"" + row.task_id + "\" title=\"Cancel\">",
-            "<i class=\"glyphicon glyphicon-ban-circle\"></i>",
-            "</div>"
-        ].join("");
+        var label = $("#tasktable").data("cancel-label") || "Cancel";
+        return "<button type=\"button\" class=\"btn btn-xs btn-danger task-cancel\" data-toggle=\"modal\" " +
+            "data-target=\"#cancelTaskModal\" data-task-id=\"" + row.task_id + "\">" +
+            "<span class=\"glyphicon glyphicon-ban-circle\"></span> " + $("<span>").text(label).html() + "</button>";
     }
     return '';
 }

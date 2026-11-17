@@ -24,13 +24,15 @@ import time
 from datetime import datetime, timezone
 
 from flask_babel import lazy_gettext as N_
+from markupsafe import Markup, escape
 from sqlalchemy import func
 
 from . import logger, ub
 from .onedrive_client import GraphClient, OneDriveAuthError, OneDriveError, content_hash, extension
 from .services.worker import CalibreTask, WorkerThread, STAT_WAITING, STAT_STARTED, STAT_FINISH_SUCCESS, \
     STAT_FAIL, STAT_ENDED, STAT_CANCELLED
-from .tasks.upload import ingest_outcome, OUTCOME_EXISTING, OUTCOME_FAILED
+from .tasks.upload import (ingest_outcome_details, request_ingest_cancel, discard_queued_ingest_file,
+                           OUTCOME_EXISTING, OUTCOME_FAILED, OUTCOME_CANCELLED)
 
 log = logger.create()
 
@@ -73,6 +75,8 @@ class ImportQueue:
         self._lock = threading.Lock()
         self._running = {}
         self._cancel_requested = set()
+        # job id -> name of the file being downloaded
+        self._downloading = {}
         self._started = False
 
     # ── public API ──────────────────────────────────────────────────────────
@@ -345,6 +349,7 @@ class ImportQueue:
                 session.query(Item).filter(Item.job_id == job.id, Item.status == PENDING).update(
                     {"status": CANCELLED}, synchronize_session=False)
                 session.commit()
+                self._cancel_ingesting(session, job.id)
             self._resolve_ingesting(session, job.id)
 
             item = (session.query(Item).filter(Item.job_id == job.id, Item.status == PENDING)
@@ -379,6 +384,8 @@ class ImportQueue:
     def _download(self, session, item, user_id, graph, stop):
         path = self._new_ingest_path(item.name, user_id)
         tmp_path = path + ".uploading"
+        with self._lock:
+            self._downloading[item.job_id] = item.name
         try:
             completed = graph.download(item.drive_item_id, tmp_path, should_stop=stop)
         except OneDriveAuthError:
@@ -390,6 +397,9 @@ class ImportQueue:
             item.error = str(e)[:500]
             session.commit()
             return
+        finally:
+            with self._lock:
+                self._downloading.pop(item.job_id, None)
         if not completed:
             _remove(tmp_path)
             return
@@ -398,17 +408,37 @@ class ImportQueue:
         item.status = INGESTING
         session.commit()
 
+    def _cancel_ingesting(self, session, job_id):
+        """Ask cwa-ingest-service to stop (and undo) the files of a cancelled job it has not finished."""
+        Item = ub.OneDriveImportItem
+        for item in session.query(Item).filter(Item.job_id == job_id, Item.status == INGESTING).all():
+            if item.error == "cancel requested":
+                continue
+            request_ingest_cancel(item.ingest_path)
+            if discard_queued_ingest_file(item.ingest_path):
+                item.status = CANCELLED
+                item.error = None
+            else:
+                item.error = "cancel requested"
+            session.commit()
+
     def _resolve_ingesting(self, session, job_id):
         Item = ub.OneDriveImportItem
         for item in session.query(Item).filter(Item.job_id == job_id, Item.status == INGESTING).all():
-            outcome = ingest_outcome(item.ingest_path, consume_marker=True)
-            if outcome is None:
+            details = ingest_outcome_details(item.ingest_path, consume_marker=True)
+            if details is None:
                 continue
-            if outcome == OUTCOME_FAILED:
+            outcome, title = details
+            cancel_requested = item.error == "cancel requested"
+            item.error = None
+            if outcome == OUTCOME_CANCELLED or (cancel_requested and outcome == OUTCOME_FAILED):
+                item.status = CANCELLED
+            elif outcome == OUTCOME_FAILED:
                 item.status = FAILED
                 item.error = "Import failed, see CWA logs"
             else:
                 item.status = EXISTING if outcome == OUTCOME_EXISTING else IMPORTED
+                item.book_title = title or None
                 if item.content_hash:
                     session.merge(ub.OneDriveImportedHash(content_hash=item.content_hash, name=item.name))
             session.commit()
@@ -422,8 +452,7 @@ class ImportQueue:
 
     # ── reporting ───────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _summarize(session, job):
+    def _summarize(self, session, job):
         Item = ub.OneDriveImportItem
         counts = dict(session.query(Item.status, func.count(Item.id)).filter(Item.job_id == job.id)
                       .group_by(Item.status).all())
@@ -433,6 +462,17 @@ class ImportQueue:
             selection = json.loads(job.selection)
         except ValueError:
             selection = []
+        current = None
+        if job.status == J_RUNNING:
+            with self._lock:
+                current = self._downloading.get(job.id)
+            if current is None:
+                ingesting = (session.query(Item.name).filter(Item.job_id == job.id, Item.status == INGESTING)
+                             .order_by(Item.seq).first())
+                current = ingesting[0] if ingesting else None
+        latest = (session.query(Item.book_title).filter(Item.job_id == job.id, Item.status == IMPORTED,
+                                                        Item.book_title.isnot(None))
+                  .order_by(Item.seq.desc()).first())
         return {
             "id": job.id,
             "status": job.status,
@@ -450,6 +490,8 @@ class ImportQueue:
             "duplicate": counts.get(DUPLICATE, 0),
             "failed": counts.get(FAILED, 0),
             "cancelled": counts.get(CANCELLED, 0),
+            "current": current,
+            "last_book": latest[0] if latest else None,
         }
 
 
@@ -501,6 +543,13 @@ class OneDriveImportTask(CalibreTask):
                               "%(failed)s failed", processed=info["processed"], total=info["total"],
                               imported=info["imported"], skipped=info["existing"] + info["duplicate"],
                               failed=info["failed"])
+            details = []
+            if info.get("current"):
+                details.append(str(N_("Current file: %(name)s", name=escape(info["current"]))))
+            if info.get("last_book"):
+                details.append(str(N_("Last imported: %(title)s", title=escape(info["last_book"]))))
+            if details:
+                self.message = Markup("{}<br>{}").format(self.message, Markup("<br>").join(details))
         if info["total"]:
             self._progress = min(1.0, info["processed"] / info["total"])
         if status == J_DONE:

@@ -827,6 +827,7 @@ class OneDriveImportItem(Base):
     status = Column(String, default='pending', index=True)
     ingest_path = Column(String)
     error = Column(String)
+    book_title = Column(String)
 
 
 class OneDriveImportedHash(Base):
@@ -1165,6 +1166,15 @@ def migrate_shelf_table(engine, _session):
         _run_ddl_with_retry(engine, "ALTER TABLE shelf ADD column 'kobo_sync' Boolean DEFAULT 0")
 
 
+def migrate_onedrive_tables(engine, _session):
+    try:
+        _session.query(exists().where(OneDriveImportItem.book_title)).scalar()
+        _session.commit()
+    except exc.OperationalError:
+        _safe_session_rollback(_session, "onedrive_import_item.book_title")
+        _run_ddl_with_retry(engine, "ALTER TABLE onedrive_import_item ADD column 'book_title' String")
+
+
 # Migrate database to current version, has to be updated after every database change. Currently migration from
 # maybe 4/5 versions back to current should work.
 # Migration is done by checking if relevant columns are existing, and then adding rows with SQL commands
@@ -1178,6 +1188,7 @@ def migrate_Database(_session):
     migrate_oauth_provider_table(engine, _session)
     migrate_config_table(engine, _session)
     migrate_magic_shelf_table(engine, _session)
+    migrate_onedrive_tables(engine, _session)
 
     # Ensure progress syncing tables in app.db (user-related tables)
     from .progress_syncing.models import ensure_app_db_tables

@@ -2185,12 +2185,13 @@ def import_ldap_users():
 
 @admi.route("/ajax/canceltask", methods=['POST'])
 @user_login_required
-@admin_required
 def cancel_task():
-    task_id = request.get_json().get('task_id', None)
+    task_id = (request.get_json(silent=True) or {}).get('task_id', None)
     worker = WorkerThread.get_instance()
-    worker.end_task(task_id)
-    return ""
+    # Admins can cancel any task, other users only their own
+    owner = None if current_user.role_admin() else current_user.name
+    cancelled = worker.end_task(task_id, user=owner)
+    return jsonify({"cancelled": bool(cancelled)})
 
 
 def _db_simulate_change():

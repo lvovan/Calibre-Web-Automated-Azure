@@ -35,6 +35,12 @@ TASK_CLEANUP_TRIGGER = 20
 QueuedTask = namedtuple('QueuedTask', 'num, user, added, task, hidden')
 
 
+def can_cancel(task):
+    """Any task can be cancelled before it starts; running tasks only if they handle it (is_cancellable)."""
+    stat = task.stat
+    return stat == STAT_WAITING or (stat == STAT_STARTED and bool(task.is_cancellable))
+
+
 def _get_main_thread():
     for t in threading.enumerate():
         if t.__class__.__name__ == '_MainThread':
@@ -143,11 +149,24 @@ class WorkerThread(threading.Thread):
 
             self.queue.task_done()
 
-    def end_task(self, task_id):
+    def end_task(self, task_id, user=None):
+        """Cancel a task. With user set, only that user's tasks can be cancelled. Returns True if cancelled."""
         ins = self.get_instance()
-        for __, __, __, task, __ in ins.tasks:
-            if str(task.id) == str(task_id) and task.is_cancellable:
-                task.stat = STAT_CANCELLED if task.stat == STAT_WAITING else STAT_ENDED
+        for __, owner, __, task, __ in ins.tasks:
+            if str(task.id) != str(task_id):
+                continue
+            if user is not None and owner != user:
+                return False
+            if not can_cancel(task):
+                return False
+            # Tasks that have not started yet are skipped by the worker loop
+            if task.stat == STAT_WAITING:
+                task.stat = STAT_CANCELLED
+                task.end_time = task.end_time or datetime.now()
+            else:
+                task.stat = STAT_ENDED
+            return True
+        return False
 
     def cancel_tasks_for_book(self, book_id):
         """Cancel all pending tasks associated with a specific book ID
@@ -318,13 +337,15 @@ class CalibreTask:
         self._scheduled = is_scheduled
 
     def _handleError(self, error_message):
-        self.stat = STAT_FAIL
+        if self.stat not in (STAT_ENDED, STAT_CANCELLED):  # a cancelled task stays cancelled
+            self.stat = STAT_FAIL
+            self.error = error_message
         self.progress = 1
-        self.error = error_message
         self.done_event.set()
 
     def _handleSuccess(self):
-        self.stat = STAT_FINISH_SUCCESS
+        if self.stat not in (STAT_ENDED, STAT_CANCELLED):
+            self.stat = STAT_FINISH_SUCCESS
         self.progress = 1
         self.done_event.set()
 

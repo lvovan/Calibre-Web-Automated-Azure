@@ -16,7 +16,7 @@ from uuid import uuid4
 from sqlalchemy.exc import SQLAlchemyError
 from flask_babel import lazy_gettext as N_
 
-from cps.services.worker import CalibreTask
+from cps.services.worker import CalibreTask, STAT_ENDED
 from cps import db
 from cps import logger, config
 from cps.subproc_wrapper import process_open
@@ -47,6 +47,36 @@ class TaskConvert(CalibreTask):
         self.user = user
 
         self.results = dict()
+        self._process = None
+
+    @property
+    def stat(self):
+        return self._stat
+
+    @stat.setter
+    def stat(self, x):
+        self._stat = x
+        if x == STAT_ENDED:  # cancelled from the Tasks page while running
+            self._stop_process()
+
+    @property
+    def cancelled(self):
+        return self._stat == STAT_ENDED
+
+    def _start_process(self, *args, **kwargs):
+        p = process_open(*args, **kwargs)
+        self._process = p
+        if self.cancelled:
+            self._stop_process()
+        return p
+
+    def _stop_process(self):
+        p = getattr(self, "_process", None)
+        if p is not None and p.poll() is None:
+            try:
+                p.terminate()
+            except OSError:
+                pass
 
     def run(self, worker_thread):
         self.worker_thread = worker_thread
@@ -164,6 +194,16 @@ class TaskConvert(CalibreTask):
             has_cover = local_db.get_book(book_id).has_cover
             check, error_message = self._convert_calibre(file_path, format_old_ext, format_new_ext, has_cover)
 
+        if self.cancelled:
+            # Partial output from the stopped converter is not a valid book
+            try:
+                os.remove(file_path + format_new_ext)
+            except OSError:
+                pass
+            local_db.session.close()
+            log.info("Conversion of book id %d to %s cancelled", book_id, format_new_ext)
+            return
+
         if check == 0:
             cur_book = local_db.get_book(book_id)
             if os.path.isfile(file_path + format_new_ext):
@@ -214,7 +254,7 @@ class TaskConvert(CalibreTask):
         quotes = [1, 3]
         command = [config.config_kepubifypath, filename, '-o', temp_file_path, '-i']
         try:
-            p = process_open(command, quotes)
+            p = self._start_process(command, quotes)
         except OSError as e:
             return 1, N_("Kepubify-converter failed: %(error)s", error=e)
         self.progress = 0.01
@@ -228,6 +268,13 @@ class TaskConvert(CalibreTask):
 
         # process returncode
         check = p.returncode
+        if self.cancelled:
+            for partial in glob.glob(glob.escape(os.path.splitext(filename)[0]) + "*.kepub.epub"):
+                try:
+                    os.unlink(partial)
+                except OSError:
+                    pass
+            check = check or 1
 
         # move file
         if check == 0:
@@ -268,7 +315,7 @@ class TaskConvert(CalibreTask):
 
                 opf_command = [calibredb_binarypath, 'show_metadata', '--as-opf', str(self.book_id),
                                '--with-library', library_path]
-                p = process_open(opf_command, quotes, my_env, newlines=False)
+                p = self._start_process(opf_command, quotes, my_env, newlines=False)
                 lines = list()
                 while p.poll() is None:
                     lines.append(p.stdout.readline())
@@ -308,7 +355,7 @@ class TaskConvert(CalibreTask):
                             command.append(parsed)
                             quotes.append(quotes_index)
                             quotes_index += 1
-            p = process_open(command, quotes, newlines=False)
+            p = self._start_process(command, quotes, newlines=False)
         except OSError as e:
             return 1, N_("Ebook-converter failed: %(error)s", error=e)
 
@@ -348,4 +395,4 @@ class TaskConvert(CalibreTask):
 
     @property
     def is_cancellable(self):
-        return False
+        return True

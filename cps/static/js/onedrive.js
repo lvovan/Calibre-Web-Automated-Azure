@@ -259,6 +259,12 @@
             $("<td class='od-job-selection'>").text(names).attr("title", names).appendTo($tr);
             var $status = $("<td>").text(statusText(job));
             if (job.error) { $status.attr("title", job.error).addClass("text-danger"); }
+            if (job.current) {
+                $("<div class='small text-muted od-job-detail'>").text(fmt(S.current_file, {name: job.current})).appendTo($status);
+            }
+            if (job.last_book) {
+                $("<div class='small text-muted od-job-detail'>").text(fmt(S.last_book, {title: job.last_book})).appendTo($status);
+            }
             $tr.append($status);
             $("<td>").text(job.imported).appendTo($tr);
             $("<td>").text(job.existing + job.duplicate).appendTo($tr);

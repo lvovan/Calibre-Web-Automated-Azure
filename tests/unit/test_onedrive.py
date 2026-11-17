@@ -214,7 +214,8 @@ class FakeIngest:
             os.remove(path)
             return None
         name = os.path.basename(path).split("_", 2)[2]
-        return self.outcomes.get(name, "imported")
+        outcome = self.outcomes.get(name, "imported")
+        return outcome, ("Title of " + name if outcome == "imported" else "")
 
 
 @pytest.fixture
@@ -235,7 +236,10 @@ def env(mods, tmp_path, monkeypatch):
     ingest.mkdir()
     counter = iter(range(1, 10000))
     fake_ingest = FakeIngest()
-    monkeypatch.setattr(mods.queue, "ingest_outcome", fake_ingest)
+    monkeypatch.setattr(mods.queue, "ingest_outcome_details", fake_ingest)
+    upload = sys.modules["cps.tasks.upload"]
+    monkeypatch.setattr(upload, "INGEST_CANCEL_DIR", str(tmp_path / "cancel"))
+    monkeypatch.setattr(upload, "INGEST_STATUS_FILE", str(tmp_path / "status"))
 
     def new_path(name, user_id):
         return str(ingest / "onedrive_{}_{}".format(next(counter), name))
@@ -314,6 +318,44 @@ def test_import_dedups_skips_known_hashes_and_filters_formats(env, monkeypatch):
     assert env.added and env.added[0][0] == "reader"
     summary = env.q.summary(job_id)
     assert (summary["imported"], summary["existing"], summary["duplicate"], summary["failed"]) == (2, 2, 1, 2)
+    assert summary["last_book"] == "Title of e.epub" and summary["current"] is None
+
+
+def test_cancel_running_job_stops_files_being_ingested(env, monkeypatch):
+    session = env.maker()
+    job = env.ub.OneDriveImportJob(user_id=5, status="running", selection="[]", enumerated=True)
+    session.add(job)
+    session.commit()
+    busy = env.ingest / "onedrive_1_busy.epub"
+    busy.write_bytes(b"book")
+    queued = env.ingest / "onedrive_2_queued.epub"
+    queued.write_bytes(b"book")
+    Item = env.ub.OneDriveImportItem
+    session.add_all([
+        Item(job_id=job.id, seq=1, drive_item_id="1", name="busy.epub", status="ingesting", ingest_path=str(busy)),
+        Item(job_id=job.id, seq=2, drive_item_id="2", name="queued.epub", status="ingesting",
+             ingest_path=str(queued)),
+        Item(job_id=job.id, seq=3, drive_item_id="3", name="later.epub", status="pending"),
+    ])
+    session.commit()
+    job_id = job.id
+
+    assert env.q.summary(job_id, session)["current"] == "busy.epub"
+    requested = []
+    monkeypatch.setattr(env.queue_mod, "request_ingest_cancel", requested.append)
+    # busy.epub is being processed by the ingest service, queued.epub not yet
+    monkeypatch.setattr(env.queue_mod, "discard_queued_ingest_file",
+                        lambda path: path == str(queued) and (os.remove(path) or True))
+    env.fake_ingest.outcomes = {"busy.epub": "cancelled"}
+    assert env.q.cancel(job_id, user_id=5) is True
+
+    env.q._process(session, session.get(env.ub.OneDriveImportJob, job_id), graph=None)
+    session.close()
+
+    assert requested == [str(busy), str(queued)]
+    assert _items(env, job_id) == [("busy.epub", "cancelled"), ("queued.epub", "cancelled"),
+                                   ("later.epub", "cancelled")]
+    assert _job(env, job_id)[0] == "cancelled"
 
 
 def test_auth_failure_fails_job(env, monkeypatch):
@@ -417,8 +459,10 @@ def test_cancel_running_job_stops_before_next_download(env, monkeypatch):
     graph.download = download_then_cancel
     env.q._run_job(job_id)
     assert graph.downloads == ["a"]
-    assert _items(env, job_id) == [("a.epub", "imported"), ("b.epub", "cancelled")]
+    # a.epub was downloaded but not yet picked up by the ingest service: discarded too
+    assert _items(env, job_id) == [("a.epub", "cancelled"), ("b.epub", "cancelled")]
     assert _job(env, job_id)[0] == "cancelled"
+    assert not list(env.ingest.iterdir())
 
 
 def test_task_proxy_reports_job_progress(env, monkeypatch):

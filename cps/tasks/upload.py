@@ -12,13 +12,17 @@ from datetime import datetime
 from pathlib import Path
 
 from flask_babel import lazy_gettext as N_
+from markupsafe import escape
 
-from cps.services.worker import CalibreTask, STAT_STARTED, STAT_FINISH_SUCCESS, STAT_FAIL
+from cps.services.worker import (CalibreTask, STAT_STARTED, STAT_FINISH_SUCCESS, STAT_FAIL, STAT_ENDED,
+                                 STAT_CANCELLED)
 
 CWA_DB_PATH = "/config/cwa.db"
 INGEST_STATUS_FILE = os.environ.get("CWA_INGEST_STATUS_FILE", "/config/cwa_ingest_status")
 # Written by scripts/ingest_processor.py record_ingest_outcome()
 INGEST_OUTCOME_DIR = os.environ.get("CWA_INGEST_OUTCOME_DIR", "/config/.cwa_ingest_outcomes")
+# Read by scripts/ingest_processor.py CancelWatch
+INGEST_CANCEL_DIR = os.environ.get("CWA_INGEST_CANCEL_DIR", "/config/.cwa_ingest_cancel")
 # Must match the filename truncation in scripts/ingest_processor.py main()
 _INGEST_MAX_FILENAME = 150
 _POLL_INTERVAL = 2
@@ -26,6 +30,7 @@ _POLL_INTERVAL = 2
 OUTCOME_IMPORTED = "imported"
 OUTCOME_EXISTING = "existing"
 OUTCOME_FAILED = "failed"
+OUTCOME_CANCELLED = "cancelled"
 
 
 def ingest_pending(path):
@@ -34,20 +39,65 @@ def ingest_pending(path):
 
 def ingest_outcome(path, is_format=False, consume_marker=False):
     """Outcome of a file handed to cwa-ingest-service, or None while it is still in the ingest folder."""
+    details = ingest_outcome_details(path, is_format, consume_marker)
+    return details[0] if details else None
+
+
+def ingest_outcome_details(path, is_format=False, consume_marker=False):
+    """(outcome, book title) of a file handed to cwa-ingest-service, or None while it is still pending."""
     if ingest_pending(path):
         return None
     for name in _ingest_names(path):
         marker = os.path.join(INGEST_OUTCOME_DIR, name)
         try:
             with open(marker, "r", encoding="utf-8") as f:
-                outcome = f.read().strip()
+                lines = f.read().splitlines()
             if consume_marker:
                 os.remove(marker)
         except OSError:
             continue
-        if outcome == OUTCOME_EXISTING:
-            return OUTCOME_EXISTING
-    return OUTCOME_FAILED if _import_failed(path, is_format) else OUTCOME_IMPORTED
+        outcome = lines[0].strip() if lines else ""
+        title = lines[1].strip() if len(lines) > 1 else ""
+        if outcome in (OUTCOME_EXISTING, OUTCOME_CANCELLED, OUTCOME_IMPORTED):
+            return outcome, title
+    return (OUTCOME_FAILED if _import_failed(path, is_format) else OUTCOME_IMPORTED), ""
+
+
+def request_ingest_cancel(path):
+    """Ask ingest_processor to stop processing this file (or skip it if it has not started yet)."""
+    try:
+        os.makedirs(INGEST_CANCEL_DIR, exist_ok=True)
+        for name in _ingest_names(path):
+            with open(os.path.join(INGEST_CANCEL_DIR, name), "w", encoding="utf-8") as f:
+                f.write(datetime.now().isoformat())
+        return True
+    except OSError:
+        return False
+
+
+def ingest_service_status():
+    try:
+        with open(INGEST_STATUS_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def is_being_ingested(path):
+    status = ingest_service_status()
+    return any(status.startswith("processing:" + name + ":") for name in _ingest_names(path))
+
+
+def discard_queued_ingest_file(path):
+    """Remove a file the ingest service has not picked up yet. Returns True if nothing is left to process."""
+    if is_being_ingested(path):
+        return False
+    for leftover in (path, path + ".uploading", path + ".cwa.json"):
+        try:
+            os.remove(leftover)
+        except OSError:
+            pass
+    return not ingest_pending(path)
 
 
 def _ingest_names(path):
@@ -93,6 +143,7 @@ class TaskUpload(CalibreTask):
         self.is_format = is_format
         self.start_time = datetime.now()
         self._last_poll = 0.0
+        self._cancel_requested = False
         if ingest_path:
             self.stat = STAT_STARTED
             self.end_time = None
@@ -116,17 +167,43 @@ class TaskUpload(CalibreTask):
 
     @stat.setter
     def stat(self, x):
+        if x in (STAT_ENDED, STAT_CANCELLED) and getattr(self, "ingest_path", None) \
+                and getattr(self, "_stat", None) == STAT_STARTED:
+            self._cancel()
+            return
         self._stat = x
+
+    def _cancel(self):
+        """Cancel requested from the Tasks page: stop the import and undo it (see ingest_processor CancelWatch)."""
+        if self._cancel_requested:
+            return
+        self._cancel_requested = True
+        request_ingest_cancel(self.ingest_path)
+        if discard_queued_ingest_file(self.ingest_path):
+            self._finish_cancelled()
+        else:
+            self.message = N_("%(title)s (cancelling...)", title=self.book_title)
+            self._last_poll = 0.0
+
+    def _finish_cancelled(self):
+        self.end_time = datetime.now()
+        self.progress = 1
+        self._stat = STAT_CANCELLED
+        self.message = N_("%(title)s (cancelled)", title=self.book_title)
 
     def _poll_ingest(self):
         path = self.ingest_path
-        outcome = ingest_outcome(path, self.is_format)
-        if outcome is None:
-            if self._ingest_service_status().startswith("processing:" + os.path.basename(path) + ":"):
+        details = ingest_outcome_details(path, self.is_format, consume_marker=True)
+        if details is None:
+            if not self._cancel_requested and is_being_ingested(path):
                 self.progress = 0.5
                 self.message = N_("%(title)s (importing...)", title=self.book_title)
             return
 
+        outcome, title = details
+        if outcome == OUTCOME_CANCELLED or (self._cancel_requested and outcome == OUTCOME_FAILED):
+            self._finish_cancelled()
+            return
         self.end_time = datetime.now()
         self.progress = 1
         if outcome == OUTCOME_FAILED:
@@ -136,17 +213,12 @@ class TaskUpload(CalibreTask):
         elif outcome == OUTCOME_EXISTING:
             self._stat = STAT_FINISH_SUCCESS
             self.message = N_("%(title)s (already in library)", title=self.book_title)
+        elif title:
+            self._stat = STAT_FINISH_SUCCESS
+            self.message = N_("%(file)s → \"%(title)s\" (imported)", file=self.book_title, title=escape(title))
         else:
             self._stat = STAT_FINISH_SUCCESS
             self.message = N_("%(title)s (imported)", title=self.book_title)
-
-    @staticmethod
-    def _ingest_service_status():
-        try:
-            with open(INGEST_STATUS_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip()
-        except OSError:
-            return ""
 
     @property
     def name(self):
@@ -157,4 +229,4 @@ class TaskUpload(CalibreTask):
 
     @property
     def is_cancellable(self):
-        return False
+        return bool(self.ingest_path) and not getattr(self, "_cancel_requested", False)

@@ -63,17 +63,149 @@ def is_onedrive_ingest_file(filename: str) -> bool:
     return os.path.basename(filename).startswith(ONEDRIVE_INGEST_PREFIX)
 
 
-def record_ingest_outcome(filename: str, outcome: str) -> None:
+def record_ingest_outcome(filename: str, outcome: str, title: str = "") -> None:
     try:
         os.makedirs(INGEST_OUTCOME_DIR, exist_ok=True)
         with open(os.path.join(INGEST_OUTCOME_DIR, os.path.basename(filename)), "w", encoding="utf-8") as f:
-            f.write(outcome)
+            # Line 1: outcome, line 2 (optional): title of the book in the library
+            f.write(outcome + ("\n" + " ".join(title.split()) if title else ""))
     except OSError as e:
         print(f"[ingest-processor] WARN: Could not record ingest outcome for {filename}: {e}", flush=True)
 
 
 def calibredb_reported_existing(output: str) -> bool:
     return "already exist" in (output or "").lower()
+
+
+# Cancellation requested from the CWA Tasks page (cps/tasks/upload.py request_ingest_cancel):
+# a marker named after the ingest file. Long conversions are stopped by killing the
+# converter; a book already added to the library is removed again.
+INGEST_CANCEL_DIR = os.environ.get("CWA_INGEST_CANCEL_DIR", "/config/.cwa_ingest_cancel")
+_STALE_MARKER_SECONDS = 7 * 24 * 3600
+
+
+class IngestCancelled(Exception):
+    pass
+
+
+class CancelWatch:
+    """Watches for a cancel request for the file being processed."""
+
+    def __init__(self, names, poll_interval=1.0):
+        self.names = [n for n in dict.fromkeys(os.path.basename(n) for n in names) if n]
+        self.poll_interval = poll_interval
+        self.cancelled = threading.Event()
+        self._stop = threading.Event()
+        self._killable = threading.Event()
+        self._thread = None
+
+    def requested(self) -> bool:
+        return any(os.path.exists(os.path.join(INGEST_CANCEL_DIR, n)) for n in self.names)
+
+    def check(self) -> None:
+        if self.cancelled.is_set() or self.requested():
+            self.cancelled.set()
+            raise IngestCancelled()
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, name="ingest-cancel-watch", daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+
+    def clear_requests(self):
+        for n in self.names:
+            try:
+                os.remove(os.path.join(INGEST_CANCEL_DIR, n))
+            except OSError:
+                pass
+
+    def killable(self):
+        """Context manager: child processes started inside are stopped on cancellation."""
+        watch = self
+
+        class _Killable:
+            def __enter__(self):
+                watch._killable.set()
+                if watch.cancelled.is_set():
+                    kill_child_processes()
+
+            def __exit__(self, *exc):
+                watch._killable.clear()
+                return False
+
+        return _Killable()
+
+    def _run(self):
+        while not self._stop.wait(self.poll_interval):
+            if not self.cancelled.is_set() and self.requested():
+                print(f"[ingest-processor] Cancel requested for {', '.join(self.names)}", flush=True)
+                self.cancelled.set()
+            if self.cancelled.is_set() and self._killable.is_set():
+                kill_child_processes()
+
+
+class _NoCancelWatch(CancelWatch):
+    def __init__(self):
+        super().__init__([])
+
+    def requested(self) -> bool:
+        return False
+
+
+_cancel_watch: CancelWatch = _NoCancelWatch()
+
+
+def check_cancel() -> None:
+    _cancel_watch.check()
+
+
+def _child_pids(root_pid: int) -> list[int]:
+    """Descendant PIDs of root_pid (Linux /proc)."""
+    parents = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", "r", encoding="utf-8", errors="ignore") as f:
+                stat = f.read()
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            continue
+        parents.setdefault(ppid, []).append(int(entry))
+    found, todo = [], [root_pid]
+    while todo:
+        for child in parents.get(todo.pop(), []):
+            found.append(child)
+            todo.append(child)
+    return found
+
+
+def kill_child_processes() -> None:
+    import signal
+    for pid in _child_pids(os.getpid()):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+
+def cleanup_stale_markers() -> None:
+    cutoff = time.time() - _STALE_MARKER_SECONDS
+    for folder in (INGEST_CANCEL_DIR, INGEST_OUTCOME_DIR):
+        try:
+            for entry in os.scandir(folder):
+                if entry.is_file() and entry.stat().st_mtime < cutoff:
+                    os.remove(entry.path)
+        except OSError:
+            pass
+
 
 class ProcessLock:
     """Robust process lock using both file locking and PID tracking"""
@@ -607,6 +739,10 @@ class NewBookProcessor:
         # Track the last added Calibre book id(s) from calibredb output
         self.last_added_book_id: int | None = None
         self.last_added_book_ids: list[int] = []
+        # Books created (not merged) by this import, removed again if the import is cancelled
+        self.new_book_ids: list[int] = []
+        self.imported_stem: str | None = None
+        self.imported_backup: str | None = None
         self._title_sort_regex = self._get_title_sort_regex()
 
     @staticmethod
@@ -643,6 +779,48 @@ class NewBookProcessor:
             return ids
         except Exception:
             return []
+
+    @staticmethod
+    def _parse_new_book_ids(output: str) -> list[int]:
+        """IDs of books calibredb created (the 'Added book ids' line only, never merged/updated ones)."""
+        import re
+        m = re.search(r"Added book id[s]?:\s*([0-9, ]+)", output or "", flags=re.IGNORECASE)
+        return [int(x.strip()) for x in m.group(1).split(",") if x.strip().isdigit()] if m else []
+
+    def book_title(self, book_id: int) -> str:
+        try:
+            with sqlite3.connect(f"file:{self.metadata_db}?mode=ro", uri=True, timeout=30) as con:
+                row = con.execute("SELECT title FROM books WHERE id = ?", (int(book_id),)).fetchone()
+            return str(row[0]) if row and row[0] else ""
+        except Exception as e:
+            print(f"[ingest-processor] WARN: Could not read title of book id {book_id}: {e}", flush=True)
+            return ""
+
+    def rollback_import(self) -> None:
+        """Undo a cancelled import: remove the books it created, its backup copy and its stats entry."""
+        if self.new_book_ids:
+            ids = ",".join(str(i) for i in dict.fromkeys(self.new_book_ids))
+            result = subprocess.run(["calibredb", "remove", "--permanent", ids, f"--library-path={self.library_dir}"],
+                                    env=self.calibre_env, check=False, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"[ingest-processor] Cancelled import: removed book id(s) {ids} from the library", flush=True)
+                mark_ingest_batch_dirty()
+            else:
+                print(f"[ingest-processor] WARN: Could not remove cancelled book id(s) {ids}: {result.stderr}", flush=True)
+        elif self.last_added_book_id is not None:
+            print("[ingest-processor] WARN: Cancelled import was merged into an existing book; nothing removed", flush=True)
+        if self.imported_backup:
+            try:
+                os.remove(self.imported_backup)
+            except OSError:
+                pass
+        if self.imported_stem:
+            try:
+                self.db.cur.execute("DELETE FROM cwa_import WHERE rowid = (SELECT MAX(rowid) FROM cwa_import "
+                                    "WHERE filename = ?)", (self.imported_stem,))
+                self.db.con.commit()
+            except Exception as e:
+                print(f"[ingest-processor] WARN: Could not remove import stats entry: {e}", flush=True)
 
     def _fallback_last_added_book_id(self) -> None:
         """Fallback to the most recently modified book when calibredb output lacks IDs."""
@@ -759,7 +937,10 @@ class NewBookProcessor:
         target_filepath = f"{self.tmp_conversion_dir}{original_filepath.stem}.{end_format}"
         try:
             t_convert_book_start = time.time()
-            subprocess.run(['ebook-convert', self.filepath, target_filepath], env=self.calibre_env, check=True)
+            check_cancel()
+            with _cancel_watch.killable():
+                subprocess.run(['ebook-convert', self.filepath, target_filepath], env=self.calibre_env, check=True)
+            check_cancel()
             t_convert_book_end = time.time()
             time_book_conversion = t_convert_book_end - t_convert_book_start
             print(f"\n[ingest-processor]: END_CON: Conversion of {self.filename} complete in {time_book_conversion:.2f} seconds.\n", flush=True)
@@ -775,6 +956,7 @@ class NewBookProcessor:
             return True, target_filepath
 
         except subprocess.CalledProcessError as e:
+            check_cancel()
             print(f"\n[ingest-processor]: CON_ERROR: {self.filename} could not be converted to {end_format} due to the following error:\nEXIT/ERROR CODE: {e.returncode}\n{e.stderr}", flush=True)
             self.backup(self.filepath, backup_type="failed")
             return False, ""
@@ -799,7 +981,10 @@ class NewBookProcessor:
             converted_filepath = Path(converted_filepath)
             target_filepath = f"{self.tmp_conversion_dir}{converted_filepath.stem}.kepub"
             try:
-                subprocess.run(['kepubify', '--inplace', '--calibre', '--output', self.tmp_conversion_dir, converted_filepath], check=True)
+                check_cancel()
+                with _cancel_watch.killable():
+                    subprocess.run(['kepubify', '--inplace', '--calibre', '--output', self.tmp_conversion_dir, converted_filepath], check=True)
+                check_cancel()
                 if self.cwa_settings['auto_backup_conversions']:
                     self.backup(self.filepath, backup_type="converted")
 
@@ -811,9 +996,12 @@ class NewBookProcessor:
                 return True, target_filepath
 
             except subprocess.CalledProcessError as e:
+                check_cancel()
                 print(f"[ingest-processor]: CON_ERROR: {self.filename} could not be converted to kepub due to the following error:\nEXIT/ERROR CODE: {e.returncode}\n{e.stderr}", flush=True)
                 self.backup(converted_filepath, backup_type="failed")
                 return False, ""
+            except IngestCancelled:
+                raise
             except Exception as e:
                 print(f"[ingest-processor] ingest-processor ran into the following error:\n{e}", flush=True)
         else:
@@ -926,6 +1114,7 @@ class NewBookProcessor:
             return
 
         try:
+            check_cancel()
             if text:
                 add_command = ["calibredb", "add", str(staged_path), f"--library-path={self.library_dir}"]
                 reject_existing = is_onedrive_ingest_file(getattr(self, "filename", "") or "")
@@ -934,6 +1123,7 @@ class NewBookProcessor:
                 result = subprocess.run(add_command, env=self.calibre_env, check=True, capture_output=True, text=True)
                 output = (result.stdout or '') + '\n' + (result.stderr or '')
                 added_ids = self._parse_added_book_ids(output)
+                self.new_book_ids = self._parse_new_book_ids(output)
                 if reject_existing and not added_ids and calibredb_reported_existing(output):
                     print(f"[ingest-processor] {staged_path.stem} is already in the library, not imported", flush=True)
                     record_ingest_outcome(self.filename, "existing")
@@ -984,7 +1174,9 @@ class NewBookProcessor:
                         add_command.extend(["--identifier", ident.strip()])
 
                 result = subprocess.run(add_command, env=self.calibre_env, check=True, capture_output=True, text=True)
-                added_ids = self._parse_added_book_ids((result.stdout or '') + '\n' + (result.stderr or ''))
+                output = (result.stdout or '') + '\n' + (result.stderr or '')
+                added_ids = self._parse_added_book_ids(output)
+                self.new_book_ids = self._parse_new_book_ids(output)
                 if added_ids:
                     self.last_added_book_ids = added_ids
                     self.last_added_book_id = added_ids[-1]
@@ -994,9 +1186,13 @@ class NewBookProcessor:
 
             if self.cwa_settings['auto_backup_imports']:
                 self.backup(str(staged_path), backup_type="imported")
+                if backup_destinations.get("imported"):
+                    self.imported_backup = os.path.join(backup_destinations["imported"], staged_path.name)
 
             self.db.import_add_entry(staged_path.stem,
                                     str(self.cwa_settings["auto_backup_imports"]))
+            self.imported_stem = staged_path.stem
+            check_cancel()
 
             mark_ingest_batch_dirty()
 
@@ -1061,8 +1257,11 @@ class NewBookProcessor:
                     print(f"[ingest-processor] WARN: Failed to adjust timestamps after overwrite import: {e}", flush=True)
 
         except subprocess.CalledProcessError as e:
+            check_cancel()
             print(f"[ingest-processor] {staged_path.stem} was not able to be added to the Calibre Library due to the following error:\nCALIBREDB EXIT/ERROR CODE: {e.returncode}\n{e.stderr}", flush=True)
             self.backup(str(staged_path), backup_type="failed")
+        except IngestCancelled:
+            raise
         except Exception as e:
             print(f"[ingest-processor] ingest-processor ran into the following error:\n{e}", flush=True)
         finally:
@@ -1390,6 +1589,7 @@ class NewBookProcessor:
 def main(filepath=None):
     """Checks if filepath is a directory. If it is, main will be ran on every file in the given directory
     Inotifywait won't detect files inside folders if the folder was moved rather than copied"""
+    global _cancel_watch
 
     if filepath is None:
         if len(sys.argv) < 2:
@@ -1403,6 +1603,8 @@ def main(filepath=None):
 
     nbp = None
     skip_delete = False
+    watch = None
+    original_filename = os.path.basename(filepath)
     try:
         ##############################################################################################
         # Truncates the filename if it is too long
@@ -1437,6 +1639,18 @@ def main(filepath=None):
                         exit_code = int(child_exit)
             return exit_code
 
+        watch = CancelWatch([original_filename, os.path.basename(filepath)])
+        if watch.requested():
+            print(f"[ingest-processor] Import of {original_filename} was cancelled before it started", flush=True)
+            record_ingest_outcome(filepath, "cancelled")
+            for leftover in (filepath, filepath + ".cwa.json"):
+                try:
+                    os.remove(leftover)
+                except OSError:
+                    pass
+            return 0
+        _cancel_watch = watch.start()
+
         if not initialize_runtime():
             return 2
 
@@ -1452,6 +1666,7 @@ def main(filepath=None):
                 print(f"[ingest-processor] WARN: File did not become ready in time or vanished (after {timeout_minutes} minutes): {nbp.filename}", flush=True)
                 skip_delete = True
                 return 0
+            check_cancel()
 
         # Sidecar manifest handling for explicit actions (e.g., add_format)
         manifest_path = filepath + ".cwa.json"
@@ -1470,6 +1685,7 @@ def main(filepath=None):
                     if book_id > -1:
                         # Validate book exists before attempting add_format
                         if nbp._validate_book_exists(book_id):
+                            check_cancel()
                             nbp.add_format_to_book(book_id, filepath)
                             success = True
                         else:
@@ -1493,6 +1709,8 @@ def main(filepath=None):
                     nbp.set_library_permissions()
                     nbp.delete_current_file()
                     return 0
+        except IngestCancelled:
+            raise
         except Exception as e:
             print(f"[ingest-processor] Error processing manifest file: {e}", flush=True)
             # Continue with normal processing if manifest handling fails
@@ -1558,12 +1776,30 @@ def main(filepath=None):
             else:
                 print(f"[ingest-processor]: Cannot convert {nbp.filepath}. {nbp.input_format} is currently unsupported / is not a known ebook format.", flush=True)
 
+        check_cancel()
+        if nbp.last_added_book_id is not None:
+            record_ingest_outcome(filepath, "imported", nbp.book_title(nbp.last_added_book_id))
         return 0
 
+    except IngestCancelled:
+        print(f"[ingest-processor] Import of {original_filename} cancelled", flush=True)
+        if nbp:
+            nbp.rollback_import()
+        record_ingest_outcome(filepath, "cancelled")
+        try:
+            os.remove(filepath + ".cwa.json")
+        except OSError:
+            pass
+        return 0
     except Exception as e:
         print(f"[ingest-processor] Unexpected error during processing: {e}", flush=True)
         raise
     finally:
+        if watch is not None:
+            watch.stop()
+            watch.clear_requests()
+            _cancel_watch = _NoCancelWatch()
+            cleanup_stale_markers()
         # Ensure cleanup always happens, even if an exception occurred
         if nbp:
             try:

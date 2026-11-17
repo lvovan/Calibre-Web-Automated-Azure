@@ -21,9 +21,11 @@ param timezone string
 @description('Existing external storage account holding the Calibre library share.')
 param contentStorageAccountName string
 
-@description('Access key of the external content storage account.')
-@secure()
-param contentStorageAccountKey string
+@description('Key Vault reference (@Microsoft.KeyVault(...)) to the content storage account key.')
+param contentKeyReference string
+
+@description('User-assigned identity allowed to read the Key Vault secret.')
+param identityId string
 
 @description('Azure Files share (in the external account) mounted at /calibre-library.')
 param libraryShareName string
@@ -77,9 +79,12 @@ var baseAppSettings = [
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
 ]
 
-var optionalAppSettings = empty(hardcoverToken) ? [] : [
+var optionalAppSettings = concat(empty(hardcoverToken) ? [] : [
   { name: 'HARDCOVER_TOKEN', value: hardcoverToken }
-]
+], empty(contentStorageAccountName) ? [] : [
+  // Resolved by App Service from Key Vault; the library mount reads its key from this setting
+  { name: 'CONTENT_STORAGE_KEY', value: contentKeyReference }
+])
 
 // Omitted until the external content storage is configured
 var libraryMount = empty(contentStorageAccountName) ? {} : {
@@ -89,7 +94,7 @@ var libraryMount = empty(contentStorageAccountName) ? {} : {
     accountName: contentStorageAccountName
     shareName: libraryShareName
     mountPath: '/calibre-library'
-    accessKey: contentStorageAccountKey
+    accessKey: '@AppSettingRef(CONTENT_STORAGE_KEY)'
   }
 }
 
@@ -98,11 +103,18 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
   location: location
   tags: tags
   kind: 'app,linux,container'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identityId}': {}
+    }
+  }
   properties: {
     serverFarmId: plan.id
     httpsOnly: true
     clientAffinityEnabled: false
     publicNetworkAccess: 'Enabled'
+    keyVaultReferenceIdentity: identityId
     siteConfig: {
       linuxFxVersion: 'DOCKER|${containerImage}'
       alwaysOn: true

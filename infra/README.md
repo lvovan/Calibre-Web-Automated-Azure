@@ -8,9 +8,11 @@ This fork can run CWA as a **Web App for Containers** on Azure App Service. The 
 Resource group (default: rg-cwa, francecentral)
 ├─ App Service plan        Linux B1, 1 instance (includes 10 GB persistent /home storage)
 ├─ Web App for Containers  ghcr.io/<owner>/<repo>:sha-<commit>
-│    /calibre-library ← SMB mount: external storage account, share "library"
+│    /calibre-library ← SMB mount: external storage account, share "library" (key read from Key Vault)
 │    /config          → symlink to /home/config (App Service persistent storage)
 │    /cwa-book-ingest and /tmp/cwa_conversion on local container disk (transient)
+├─ User-assigned identity  used by the web app to read Key Vault references
+├─ Key Vault               Standard, access policies, secret "content-storage-key"
 ├─ Log Analytics           30-day retention, 0.1 GB/day cap
 └─ Application Insights    workspace-based
 
@@ -40,6 +42,13 @@ At startup, the `init-cwa-persistent-config` s6 service runs before the base ima
 | `TRUSTED_PROXY_COUNT` | `1` | The App Service front end is the only proxy. |
 | `WEBSITES_PORT` | `8083` | CWA listen port. |
 | `WEBSITES_ENABLE_APP_SERVICE_STORAGE` | `true` | Mounts persistent `/home`, which holds `/config`. |
+| `CONTENT_STORAGE_KEY` | `@Microsoft.KeyVault(SecretUri=https://kv-….vault.azure.net/secrets/content-storage-key/<version>)` | Key Vault reference. The `/calibre-library` mount reads its access key from it (`@AppSettingRef(CONTENT_STORAGE_KEY)`). Only set when content storage is configured. |
+
+### Content storage key and Key Vault
+
+The deployment workflow writes the content account key (from the `CONTENT_STORAGE_CONNECTION_STRING` GitHub secret) to the `content-storage-key` secret in the Key Vault. The web app resolves it with its user-assigned identity, which is the vault's only access policy (*get* secrets). Every deployment re-applies the access policies, so policies added by hand are removed. Keep the GitHub secret as the source of truth: a value changed directly in Key Vault is overwritten by the next deployment.
+
+App Service resolves Key Vault references in app settings into environment variables, so the key is also visible inside the container as `CONTENT_STORAGE_KEY`. Key Vault adds central storage, auditing and rotation; it doesn't hide the key from the container itself.
 
 On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/calibre-library` isn't an Azure Files (network) mount, or if `/config` is neither a mount nor on persistent `/home`. This prevents data from being silently written to ephemeral disk, including the anonymous volume Docker creates for `/calibre-library` when no share is mounted.
 
@@ -131,6 +140,7 @@ The deployment binds the hostname, creates an App Service managed certificate (f
 | App Service plan B1 Linux (includes 10 GB `/home` storage for `/config`) | ~€12 |
 | Library share (Hot) | ~€0.03/GiB + transactions |
 | Log Analytics / App Insights | €0 within the 5 GB/month free allowance; hard cap 0.1 GB/day |
+| Key Vault (Standard) | A few cents (secret reads at app restarts and every 24 hours) |
 | Managed certificate, GHCR | Free |
 
 The polling watchers (`NETWORK_SHARE_MODE`) generate a steady trickle of SMB transactions on the library share, typically well under €1/month.
@@ -149,8 +159,8 @@ To change the caps, use the `logDailyQuotaGb` and `logRetentionInDays` parameter
 
 ### Rotating the content storage key
 
-1. Update the `CONTENT_STORAGE_ACCOUNT_KEY` secret with **key2**: `az storage account keys list ... --query '[1].value'`.
-2. Re-run the workflow. The mount now uses key2.
+1. Update the `CONTENT_STORAGE_CONNECTION_STRING` secret with the connection string for **key2** (or `CONTENT_STORAGE_ACCOUNT_KEY` with `az storage account keys list ... --query '[1].value'`).
+2. Re-run the workflow. It writes a new version of the Key Vault secret and restarts the app, so the mount now uses key2.
 3. Regenerate key1: `az storage account keys renew -n <account> -g <rg> --key key1`.
 
 Next time, swap roles.
@@ -179,7 +189,7 @@ Next time, swap roles.
 - **SQLite on network storage.** WAL is disabled and access is serialized, but a hard crash during a write can still corrupt a database. Keep share snapshots and `/config` backups for anything you can't lose.
 - **Performance.** Every library query and cover read goes over SMB. Large library pages are slower than on local disk.
 - **In-flight uploads.** Uploads waiting in the local ingest folder are lost if the app restarts before they are imported.
-- **Account keys.** App Service SMB mounts require the storage account key; SAS and managed identity aren't supported for mounts.
+- **Account keys.** App Service SMB mounts require the storage account key; SAS and managed identity aren't supported for mounts. The key is stored in Key Vault, but App Service also exposes it to the container as an environment variable.
 - **On-demand conversion.** Automatic conversion is off, but the stock Calibre-Web **Convert** button on a book's edit page and CWA's **Convert Library** page remain available to users with edit or admin rights. Avoid them on B1: conversions are CPU-heavy and write through SMB.
 
 ## Post-deployment validation checklist

@@ -54,21 +54,27 @@ if (-not $spId) {
   $spId = Invoke-Az ad sp create --id $appId --query id -o tsv
 }
 
-$credName = "github-$($GitHubRepo -replace '[^A-Za-z0-9-]', '-')-$Branch"
-$subject = "repo:${GitHubRepo}:ref:refs/heads/$Branch"
-$existing = Invoke-Az ad app federated-credential list --id $appId --query "[?subject=='$subject'].name" -o tsv
-if (-not $existing) {
-  Write-Host "Federated credential for $subject..."
+function Add-FederatedCredential([string] $Name, [string] $Subject) {
+  $existing = Invoke-Az ad app federated-credential list --id $appId --query "[?subject=='$Subject'].name" -o tsv
+  if ($existing) { Write-Host "Federated credential for $Subject already exists."; return }
+  Write-Host "Federated credential for $Subject..."
   $tmp = New-TemporaryFile
   @{
-    name      = $credName.Substring(0, [Math]::Min(120, $credName.Length))
+    name      = $Name
     issuer    = 'https://token.actions.githubusercontent.com'
-    subject   = $subject
+    subject   = $Subject
     audiences = @('api://AzureADTokenExchange')
   } | ConvertTo-Json | Set-Content -Path $tmp -Encoding utf8
   try { Invoke-Az ad app federated-credential create --id $appId --parameters "@$tmp" | Out-Null } finally { Remove-Item $tmp }
-} else {
-  Write-Host "Federated credential for $subject already exists."
+}
+
+$credName = "github-$($GitHubRepo -replace '[^A-Za-z0-9-]', '-')-$Branch"
+$credName = $credName.Substring(0, [Math]::Min(110, $credName.Length))
+Add-FederatedCredential $credName "repo:${GitHubRepo}:ref:refs/heads/$Branch"
+# Some repositories issue OIDC subjects with immutable owner/repo IDs (repo:owner@id/name@id:...)
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+  $ids = & gh api "repos/$GitHubRepo" --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"' 2>$null
+  if ($LASTEXITCODE -eq 0 -and $ids) { Add-FederatedCredential "$credName-ids" "repo:${ids}:ref:refs/heads/$Branch" }
 }
 
 Write-Host "Contributor role on $ResourceGroup..."

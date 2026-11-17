@@ -38,18 +38,26 @@ if [ -z "$SP_ID" ]; then
   SP_ID="$(az ad sp create --id "$APP_ID" --query id -o tsv)"
 fi
 
-SUBJECT="repo:${GITHUB_REPO}:ref:refs/heads/${BRANCH}"
-CRED_NAME="$(echo "github-${GITHUB_REPO}-${BRANCH}" | tr -c 'A-Za-z0-9-\n' '-' | cut -c1-120)"
-if [ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$SUBJECT'].name" -o tsv)" ]; then
-  echo "Federated credential for $SUBJECT..."
-  az ad app federated-credential create --id "$APP_ID" --parameters "{
-    \"name\": \"$CRED_NAME\",
-    \"issuer\": \"https://token.actions.githubusercontent.com\",
-    \"subject\": \"$SUBJECT\",
-    \"audiences\": [\"api://AzureADTokenExchange\"]
-  }" -o none
-else
-  echo "Federated credential for $SUBJECT already exists."
+add_federated_credential() { # $1 = name, $2 = subject
+  if [ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$2'].name" -o tsv)" ]; then
+    echo "Federated credential for $2..."
+    az ad app federated-credential create --id "$APP_ID" --parameters "{
+      \"name\": \"$1\",
+      \"issuer\": \"https://token.actions.githubusercontent.com\",
+      \"subject\": \"$2\",
+      \"audiences\": [\"api://AzureADTokenExchange\"]
+    }" -o none
+  else
+    echo "Federated credential for $2 already exists."
+  fi
+}
+
+CRED_NAME="$(echo "github-${GITHUB_REPO}-${BRANCH}" | tr -c 'A-Za-z0-9-\n' '-' | cut -c1-110)"
+add_federated_credential "$CRED_NAME" "repo:${GITHUB_REPO}:ref:refs/heads/${BRANCH}"
+# Some repositories issue OIDC subjects with immutable owner/repo IDs (repo:owner@id/name@id:...)
+if command -v gh >/dev/null 2>&1; then
+  IDS="$(gh api "repos/${GITHUB_REPO}" --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"' 2>/dev/null || true)"
+  [ -n "$IDS" ] && add_federated_credential "${CRED_NAME}-ids" "repo:${IDS}:ref:refs/heads/${BRANCH}"
 fi
 
 echo "Contributor role on $RESOURCE_GROUP..."

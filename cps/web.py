@@ -2345,6 +2345,7 @@ def login_post():
         else:
             if user and check_password_hash(str(user.password), form['password']) and user.name != "Guest":
                 config.config_is_initial = False
+                ub.remember_kosync_key(user, form['password'])
                 log.debug(u"You are now logged in as: '{}'".format(user.name))
                 return handle_login_user(user,
                                          remember_me,
@@ -2404,6 +2405,7 @@ def change_profile(kobo_support, hardcover_support, local_oauth_check, oauth_sta
         if current_user.role_passwd() or current_user.role_admin():
             if to_save.get("password", "") != "":
                 current_user.password = generate_password_hash(valid_password(to_save.get("password")))
+                ub.remember_kosync_key(current_user, to_save.get("password"), commit=False)
         if to_save.get("kindle_mail", current_user.kindle_mail) != current_user.kindle_mail:
             current_user.kindle_mail = valid_email(to_save.get("kindle_mail"))
         if to_save.get("kindle_mail_subject", current_user.kindle_mail_subject) != current_user.kindle_mail_subject:

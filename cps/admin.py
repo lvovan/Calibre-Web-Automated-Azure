@@ -2582,6 +2582,7 @@ def _delete_user(content):
             ub.session.query(ub.User_Sessions).filter(ub.User_Sessions.user_id == content.id).delete()
             ub.session.query(ub.KoboSyncedBooks).filter(ub.KoboSyncedBooks.user_id == content.id).delete()
             ub.session.query(ub.OneDriveConnection).filter(ub.OneDriveConnection.user_id == content.id).delete()
+            ub.session.query(ub.KOSyncKey).filter(ub.KOSyncKey.user_id == content.id).delete()
             job_ids = [j.id for j in ub.session.query(ub.OneDriveImportJob.id)
                        .filter(ub.OneDriveImportJob.user_id == content.id).all()]
             if job_ids:

@@ -227,6 +227,23 @@
 
   <div class="kosync-container">
     <div class="kosync-section">
+      <h3 class="kosync-heading">📖&nbsp;&nbsp;&nbsp;{{_('Using KOReader\'s built-in Progress sync instead')}}</h3>
+
+      <div class="kosync-step">
+      <p>{{_('KOReader\'s own Progress sync also works without installing the plugin. In KOReader, open Tools → Progress sync → Custom sync server and use:')}}</p>
+      <ul style="margin-top: 10px;">
+        <li><strong>{{_('Custom sync server')}}:</strong>&nbsp;&nbsp;&nbsp;<code>{{ request.url_root }}kosync</code></li>
+        <li><strong>{{_('Login')}}:</strong>&nbsp;&nbsp;&nbsp;{{_('Your Calibre-Web-Automated username and password (do not use Register)')}}</li>
+      </ul>
+      <div class="kosync-warning">
+        {{_('Sign in to this web interface once with your password before logging in from KOReader (and again if an administrator changes your password). Accounts that only sign in through OAuth or LDAP must use the plugin.')}}
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="kosync-container">
+    <div class="kosync-section">
       <h3 class="kosync-heading">🔄&nbsp;&nbsp;&nbsp;Using the Sync Feature</h3>
 
       <div class="kosync-info">

@@ -41,7 +41,8 @@ try:
 except ImportError:
     from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import backref, relationship, sessionmaker, Session, scoped_session
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
+import hashlib
 
 from . import constants, logger
 from .string_helper import strip_whitespaces
@@ -785,6 +786,62 @@ class RemoteAuthToken(Base):
 
     def __repr__(self):
         return '<Token %r>' % self.id
+
+
+# KOReader built-in progress sync (cps/progress_syncing/protocols/kosync.py)
+class KOSyncKey(Base):
+    """Credential for KOReader's built-in progress sync, which sends md5(password) as x-auth-key.
+
+    Captured at password login. password_ref fingerprints the user's password hash at that time,
+    so the key stops working as soon as the password changes.
+    """
+    __tablename__ = 'kosync_key'
+
+    user_id = Column(Integer, ForeignKey('user.id'), primary_key=True)
+    key_hash = Column(String, nullable=False)
+    password_ref = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+def kosync_userkey(password):
+    return hashlib.md5(password.encode('utf-8')).hexdigest()
+
+
+def _password_ref(user):
+    return hashlib.sha256(str(user.password or "").encode('utf-8')).hexdigest()
+
+
+def remember_kosync_key(user, password, commit=True):
+    """Store KOReader's sync key for a user who just proved their password."""
+    if session is None or not user or not getattr(user, 'id', None) or not password or not user.password:
+        return
+    try:
+        key = kosync_userkey(password)
+        ref = _password_ref(user)
+        row = session.get(KOSyncKey, user.id)
+        if row and row.password_ref == ref and check_password_hash(row.key_hash, key):
+            return
+        if row is None:
+            row = KOSyncKey(user_id=user.id)
+            session.add(row)
+        row.key_hash = generate_password_hash(key)
+        row.password_ref = ref
+        row.updated_at = datetime.now(timezone.utc)
+        if commit:
+            session.commit()
+    except Exception as e:
+        log.warning("Could not store KOReader sync key for user %s: %s", user.id, e)
+        if commit:
+            session.rollback()
+
+
+def verify_kosync_key(user, key):
+    if session is None or not user or not key:
+        return False
+    row = session.get(KOSyncKey, user.id)
+    if row is None or row.password_ref != _password_ref(user):
+        return False
+    return check_password_hash(row.key_hash, key.lower())
 
 
 # OneDrive import (cps/onedrive.py, cps/onedrive_queue.py)

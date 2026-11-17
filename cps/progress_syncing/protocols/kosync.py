@@ -13,8 +13,12 @@ This module provides a sync server compatible with KOReader's sync functionality
 allowing users to sync their reading progress across devices.
 
 Protocol Specification:
-    - Authentication: HTTP Basic Auth (RFC 7617)
+    - Authentication, either:
+        * HTTP Basic Auth (RFC 7617), sent by the CWA KOReader plugin
+        * x-auth-user / x-auth-key headers (key = md5(password)), sent by KOReader's built-in
+          progress sync. The key is verified against ub.KOSyncKey, captured at web login.
     - Endpoints:
+        * POST /kosync/users/create - Registration (always refused with an explanation)
         * GET  /kosync/users/auth - Authenticate user
         * GET  /kosync/syncs/progress/<document> - Get reading progress
         * PUT  /kosync/syncs/progress - Update reading progress
@@ -80,13 +84,19 @@ MAX_PROGRESS_LENGTH = 255  # Maximum progress string length
 MAX_DEVICE_LENGTH = 100    # Maximum device name length
 MAX_DEVICE_ID_LENGTH = 100 # Maximum device ID length
 
+UNAUTHORIZED_MESSAGE = ("Unauthorized. Use your Calibre-Web Automated username and password. "
+                        "For KOReader's built-in progress sync, sign in to the web interface once "
+                        "with that password first.")
+
 
 def _require_kosync_enabled():
+    # 401 is one of the few statuses KOReader understands, so the device shows this message
+    # instead of "Unknown server error"
     if not is_koreader_sync_enabled():
         return create_sync_response({
             "error": ERROR_NO_STORAGE,
-            "message": "KOReader sync is disabled"
-        }, 503)
+            "message": "KOReader sync is disabled on this server"
+        }, 401)
     return None
 
 
@@ -147,6 +157,10 @@ def authenticate_user() -> Optional[ub.User]:
             return user
 
     auth_header = request.headers.get('Authorization')
+
+    if (not auth_header or not auth_header.startswith('Basic ')) and \
+            ('x-auth-user' in request.headers or 'x-auth-key' in request.headers):
+        return _authenticate_kosync_key()
 
     if not auth_header or not auth_header.startswith('Basic '):
         log.debug("Missing or invalid Authorization header")
@@ -209,6 +223,23 @@ def authenticate_user() -> Optional[ub.User]:
     return None
 
 
+def _authenticate_kosync_key() -> Optional[ub.User]:
+    """Authenticate KOReader's built-in progress sync (x-auth-user + x-auth-key = md5(password))."""
+    username = request.headers.get('x-auth-user', '')
+    key = request.headers.get('x-auth-key', '')
+    if not is_valid_field(key) or not is_valid_key_field(username, max_length=MAX_DEVICE_LENGTH):
+        return None
+    try:
+        user = ub.session.query(ub.User).filter(func.lower(ub.User.name) == username.lower()).first()
+        if user and user.name != "Guest" and ub.verify_kosync_key(user, key):
+            return user
+    except SQLAlchemyError as e:
+        log.error(f"Database error during KOReader key check: {e}")
+        return None
+    log.debug(f"KOReader sync key rejected for user: {username}")
+    return None
+
+
 def create_sync_response(data: Dict[str, Any], status_code: int = 200) -> tuple:
     """
     Create a standardized JSON sync response.
@@ -231,13 +262,14 @@ def handle_sync_error(error: KOSyncError) -> tuple:
         error: KOSyncError with error code and message
 
     Returns:
-        JSON error response with 400 status code
+        JSON error response: 401 for authentication failures (shown by KOReader), 400 otherwise
     """
     log.error(f"KOSync Error {error.error_code}: {error.message}")
+    status = 401 if error.error_code == ERROR_UNAUTHORIZED_USER else 400
     return create_sync_response({
         "error": error.error_code,
         "message": error.message
-    }, 400)
+    }, status)
 
 
 def get_book_by_checksum(document_checksum: str, version: str = None):
@@ -515,8 +547,23 @@ def auth_user():
     else:
         return create_sync_response({
             "error": ERROR_UNAUTHORIZED_USER,
-            "message": "Unauthorized"
+            "message": UNAUTHORIZED_MESSAGE
         }, 401)
+
+
+@csrf.exempt
+@kosync.route("/kosync/users/create", methods=["POST"])
+def create_user():
+    """KOReader "Register": accounts come from Calibre-Web, so explain how to sign in instead.
+
+    402 is the status KOReader displays for a refused registration.
+    """
+    return create_sync_response({
+        "error": ERROR_USER_EXISTS,
+        "message": "Registration is not available. Use Login with your Calibre-Web Automated "
+                   "username and password."
+    }, 402)
+
 
 @csrf.exempt
 @kosync.route("/kosync/syncs/progress/<document>", methods=["GET"])
@@ -562,7 +609,7 @@ def get_progress(document: str):
 
         user = authenticate_user()
         if not user:
-            raise KOSyncError(ERROR_UNAUTHORIZED_USER, "Unauthorized")
+            raise KOSyncError(ERROR_UNAUTHORIZED_USER, UNAUTHORIZED_MESSAGE)
 
         if not is_valid_key_field(document):
             raise KOSyncError(ERROR_DOCUMENT_FIELD_MISSING, "Invalid document field")
@@ -657,7 +704,7 @@ def update_progress():
 
         user = authenticate_user()
         if not user:
-            raise KOSyncError(ERROR_UNAUTHORIZED_USER, "Unauthorized")
+            raise KOSyncError(ERROR_UNAUTHORIZED_USER, UNAUTHORIZED_MESSAGE)
 
         data = request.get_json()
         if not data:

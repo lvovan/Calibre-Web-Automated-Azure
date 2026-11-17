@@ -34,7 +34,11 @@ OUTCOME_CANCELLED = "cancelled"
 
 
 def ingest_pending(path):
-    return os.path.exists(path) or os.path.exists(path + ".uploading")
+    # ingest_processor renames over-long files first: the file is still pending under its truncated name
+    if os.path.exists(path + ".uploading"):
+        return True
+    folder = os.path.dirname(path)
+    return any(os.path.exists(os.path.join(folder, name)) for name in _ingest_names(path))
 
 
 def ingest_outcome(path, is_format=False, consume_marker=False):

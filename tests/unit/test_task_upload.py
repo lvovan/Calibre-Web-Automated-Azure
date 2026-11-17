@@ -91,6 +91,18 @@ def test_long_filename_matches_truncated_stem(upload, tmp_path):
     assert task.stat == worker.STAT_FINISH_SUCCESS
 
 
+def test_long_filename_stays_started_while_processed_under_truncated_name(upload, tmp_path):
+    module, worker = upload
+    stem = "n" * 200
+    task = module.TaskUpload("msg", "b", ingest_path=str(tmp_path / (stem + ".epub")))
+    truncated = tmp_path / (stem[:150 - len(".epub")] + ".epub")
+    truncated.write_text("x")  # renamed by ingest_processor, import still running
+    assert task.stat == worker.STAT_STARTED
+    truncated.unlink()
+    _record_import(tmp_path, truncated.stem)
+    assert task.stat == worker.STAT_FINISH_SUCCESS
+
+
 def test_format_upload_outcome_from_manifest(upload, tmp_path):
     module, worker = upload
     ok = module.TaskUpload("msg", "b", ingest_path=str(tmp_path / "fmt_ok.epub"), is_format=True)

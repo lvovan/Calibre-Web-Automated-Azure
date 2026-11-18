@@ -572,12 +572,38 @@ class CalibreDB:
     instances = WeakSet()
     _reconnect_lock = threading.RLock()  # Reentrant lock to prevent concurrent reconnect operations
 
-    def __init__(self, expire_on_commit=True, init=False):
+    def __init__(self, expire_on_commit=True, init=False, thread_scoped=False):
         """ Initialize a new CalibreDB session
+
+        thread_scoped instances (the global web instance) never pin a Session object: every
+        access resolves the calling thread's session from the scoped factory. Otherwise a
+        reconnect running on the worker thread re-binds the web instance to the worker
+        thread's session, which worker tasks then share with web requests and close
+        (DetachedInstanceError / "identity map is no longer valid" on delete).
         """
-        self.session = None
+        self._thread_scoped = thread_scoped
+        self._session = None
         if init:
             self.init_db(expire_on_commit)
+
+    @property
+    def session(self):
+        if self._session is not None or not self._thread_scoped:
+            return self._session
+        factory = self.session_factory
+        return factory() if factory is not None else None
+
+    @session.setter
+    def session(self, value):
+        if self._thread_scoped and value is not None and self.session_factory is not None:
+            try:
+                if value is self.session_factory():
+                    # Keep resolving per thread instead of pinning this thread's session.
+                    self._session = None
+                    return
+            except Exception:
+                pass
+        self._session = value
 
     def init_db(self, expire_on_commit=True):
         if self._init:
@@ -1332,6 +1358,10 @@ class CalibreDB:
                             old_session.bind.dispose()
                         except Exception:
                             pass
+
+            # Thread-scoped instances must not resolve sessions from the stale factory
+            # while the engine is being rebuilt; ensure_session() waits on the lock instead.
+            cls.session_factory = None
 
             for attr in list(Books.__dict__.keys()):
                 if attr.startswith("custom_column_"):

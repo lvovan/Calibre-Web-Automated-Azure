@@ -104,7 +104,7 @@ if wtf_present:
 else:
     csrf = None
 
-calibre_db = db.CalibreDB()
+calibre_db = db.CalibreDB(thread_scoped=True)
 
 web_server = WebServer()
 

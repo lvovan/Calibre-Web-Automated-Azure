@@ -419,7 +419,7 @@ def render_prepare_search_form(cc):
 
 def library_search_error(error):
     return {
-        'id': _("Use one positive book ID, such as id:949."),
+        'id': _("Book IDs must be positive integers, for example id:123 id:456."),
         'format': _("Use a format name after format:, such as format:epub."),
         'quote': _("Enclose a non-empty phrase in double quotes."),
         'length': _("Search is limited to 256 characters and 12 terms or format filters."),

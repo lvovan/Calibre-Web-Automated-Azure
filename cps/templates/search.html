@@ -8,15 +8,15 @@
         <ul>
           <li>{{_('Words in any order:')}} <code>hits eye</code></li>
           <li>{{_('Exact phrase:')}} <code>"hits your eye"</code></li>
-          <li>{{_('Book ID:')}} <code>id:949</code> / <code>#949</code></li>
+          <li>{{_('Match any of these book IDs:')}} <code>id:123 ID:456</code> / <code>#123 #456</code></li>
           <li>{{_('Format:')}} <code>.epub</code> / <code>format:epub</code></li>
           <li>{{_('Combine words and filters:')}} <code>hits eye format:epub</code></li>
         </ul>
       </details>
     {% endif %}
     {% if search_filters %}
-      {% if search_filters.book_id %}
-        <p>{{_('Book ID:')}} <code>{{search_filters.book_id}}</code></p>
+      {% if search_filters.book_ids %}
+        <p>{{_('Book IDs:')}} <code>{{search_filters.book_ids|join(', ')}}</code></p>
       {% endif %}
       {% if search_filters.formats %}
         <p>{{_('Format:')}} <code>{{search_filters.formats|join(', ')}}</code></p>

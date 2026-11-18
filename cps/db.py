@@ -1236,8 +1236,8 @@ class CalibreDB:
 
     def _natural_search_query(self, query, parsed, columns, relevance):
         query = query.options(joinedload(Books.data)).filter(self.common_filters(True))
-        if parsed.book_id is not None:
-            query = query.filter(Books.id == parsed.book_id)
+        if parsed.book_ids:
+            query = query.filter(Books.id.in_(parsed.book_ids))
         for fmt in parsed.formats:
             query = query.filter(self.book_has_format(fmt))
 
@@ -1270,7 +1270,7 @@ class CalibreDB:
             query = query.filter(or_(Books.id == parsed.bare_id, and_(*all_terms)))
         elif all_terms:
             query = query.filter(and_(*all_terms))
-        if not (all_terms or parsed.formats or parsed.book_id is not None):
+        if not (all_terms or parsed.formats or parsed.book_ids):
             return query.filter(false())
         if relevance:
             ranking = []

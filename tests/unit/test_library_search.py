@@ -58,6 +58,8 @@ def ids(library, query, relevance=True):
     ("949", [949, 3]),
     ("#949", [949]),
     ("id:949", [949]),
+    ("id:1 ID:949 iD:1 #999", [1, 949]),
+    ("#1 #949 format:epub", [949]),
     ("id:999", []),
     ("warriors montreal", [2]),
     ('"warriors" montreal', []),
@@ -70,6 +72,7 @@ def test_search_filters_and_relevance(library, query, expected):
 def test_exact_id_does_not_bypass_visibility(library, monkeypatch):
     monkeypatch.setattr(library, "common_filters", lambda *_: db.Books.id != 949)
     assert ids(library, "id:949") == []
+    assert ids(library, "id:1 ID:949") == [1]
     assert ids(library, "949") == [3]
     assert ids(library, "epub") == []
 
@@ -82,7 +85,7 @@ def test_explicit_sort_and_selection(library):
                                                        [949, 2, 949], 0, 10, "desc")] == [949, 1, 4]
 
 
-@pytest.mark.parametrize("query", ["id:", "id:-7", "id:1 #2", "format:", "format:epub%",
+@pytest.mark.parametrize("query", ["id:", "id:-7", "id:1 ID:0", "format:", "format:epub%",
                                    '"hits eye', "id:9223372036854775808", "a " * 13, "x" * 257])
 def test_invalid_syntax(query):
     with pytest.raises(SearchSyntaxError):

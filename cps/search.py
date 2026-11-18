@@ -20,6 +20,7 @@ from .string_helper import strip_whitespaces
 from .usermanagement import login_required_if_no_ano
 from .render_template import render_title_template
 from .pagination import Pagination
+from .library_search import parse_library_search, SearchSyntaxError
 
 
 search = Blueprint('search', __name__)
@@ -159,9 +160,9 @@ def adv_search_read_status(read_status):
 
 def adv_search_extension(q, include_extension_inputs, exclude_extension_inputs):
     for extension in include_extension_inputs:
-        q = q.filter(db.Books.data.any(db.Data.format == extension))
+        q = q.filter(db.CalibreDB.book_has_format(extension))
     for extension in exclude_extension_inputs:
-        q = q.filter(not_(db.Books.data.any(db.Data.format == extension)))
+        q = q.filter(not_(db.CalibreDB.book_has_format(extension)))
     return q
 
 
@@ -416,29 +417,43 @@ def render_prepare_search_form(cc):
                                  series=series,shelves=shelves, title=_("Advanced Search"), cc=cc, page="advsearch")
 
 
+def library_search_error(error):
+    return {
+        'id': _("Use one positive book ID, such as id:949."),
+        'format': _("Use a format name after format:, such as format:epub."),
+        'quote': _("Enclose a non-empty phrase in double quotes."),
+        'length': _("Search is limited to 256 characters and 12 terms or format filters."),
+    }[str(error)]
+
+
 def render_search_results(term, offset=None, order=None, limit=None):
-    if term:
+    entries, result_count, pagination = [], 0, None
+    parsed = None
+    if term and term.strip():
+        try:
+            parsed = parse_library_search(term)
+        except SearchSyntaxError as error:
+            flash(library_search_error(error), category="error")
+    if parsed is not None:
         join = db.books_series_link, db.Books.id == db.books_series_link.c.book, db.Series
         entries, result_count, pagination = calibre_db.get_search_results(term,
                                                                           config,
                                                                           offset,
                                                                           order,
                                                                           limit,
-                                                                          *join)
-    else:
-        entries = list()
-        order = [None, None]
-        pagination = result_count = None
+                                                                          *join,
+                                                                          parsed=parsed)
 
     return render_title_template('search.html',
                                  searchterm=term,
                                  pagination=pagination,
                                  query=term,
                                  adv_searchterm=term,
+                                 search_filters=parsed,
                                  entries=entries,
                                  result_count=result_count,
                                  title=_("Search"),
                                  page="search",
-                                 order=order[1])
+                                 order=order[1] if order else None)
 
 

@@ -31,7 +31,7 @@ try:
 except ImportError:
     from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import StaticPool
-from sqlalchemy.sql.expression import and_, true, false, text, func, or_
+from sqlalchemy.sql.expression import and_, true, false, text, func, or_, cast
 from sqlalchemy.ext.associationproxy import association_proxy
 from .cw_login import current_user
 from flask_babel import gettext as _
@@ -41,6 +41,7 @@ from flask import flash
 from . import logger, ub, isoLanguages
 from .pagination import Pagination
 from .string_helper import strip_whitespaces
+from .library_search import normalize_search_text, search_text_score
 
 log = logger.create()
 
@@ -1050,11 +1051,8 @@ class CalibreDB:
         else:
             elementlist = {ele.id: ele for ele in inputlist}
         for entry in state:
-            try:
-                outcome.append(elementlist[entry])
-            except KeyError:
-                pass
-            del elementlist[entry]
+            if entry in elementlist:
+                outcome.append(elementlist.pop(entry))
         for entry in elementlist:
             outcome.append(elementlist[entry])
         if order == "asc":
@@ -1202,15 +1200,9 @@ class CalibreDB:
         return self.session.query(Books) \
             .filter(and_(Books.authors.any(and_(*q)), func.lower(Books.title).ilike("%" + title + "%"))).first()
 
-    def search_query(self, term, config, *join):
+    def search_query(self, term, config, *join, parsed=None, relevance=False):
         self.ensure_session()
-        strip_whitespaces(term).lower()
         self.create_functions()
-        # self.session.connection().connection.connection.create_function("lower", 1, lcase)
-        q = list()
-        author_terms = re.split("[, ]+", term)
-        for author_term in author_terms:
-            q.append(Books.authors.any(func.lower(Authors.name).ilike("%" + author_term + "%")))
         query = self.generate_linked_query(config.config_read_column, Books)
         if len(join) == 6:
             query = query.outerjoin(join[0], join[1]).outerjoin(join[2]).outerjoin(join[3], join[4]).outerjoin(join[5])
@@ -1222,6 +1214,11 @@ class CalibreDB:
             query = query.outerjoin(join[0])
 
         cc = self.get_cc_columns(config, filter_config_custom_read=True)
+        if parsed is not None:
+            return self._natural_search_query(query, parsed, cc, relevance)
+
+        q = [Books.authors.any(func.lower(Authors.name).ilike("%" + word + "%"))
+             for word in re.split("[, ]+", term)]
         filter_expression = [Books.tags.any(func.lower(Tags.name).ilike("%" + term + "%")),
                              Books.series.any(func.lower(Series.name).ilike("%" + term + "%")),
                              Books.authors.any(and_(*q)),
@@ -1236,6 +1233,64 @@ class CalibreDB:
         # Eagerly load the data relationship to prevent session errors
         query = query.options(joinedload(Books.data))
         return query.filter(self.common_filters(True)).filter(or_(*filter_expression))
+
+    def _natural_search_query(self, query, parsed, columns, relevance):
+        query = query.options(joinedload(Books.data)).filter(self.common_filters(True))
+        if parsed.book_id is not None:
+            query = query.filter(Books.id == parsed.book_id)
+        for fmt in parsed.formats:
+            query = query.filter(self.book_has_format(fmt))
+
+        fields = [(Books.authors, Authors.name), (Books.tags, Tags.name),
+                  (Books.series, Series.name), (Books.publishers, Publishers.name)]
+        for column in columns:
+            if column.datatype not in ("datetime", "rating", "bool", "int", "float"):
+                fields.append((getattr(Books, 'custom_column_' + str(column.id)), cc_classes[column.id].value))
+
+        all_terms = []
+        title_scores = []
+        exact_terms = []
+        for term in parsed.terms:
+            def score(value):
+                return func.cwa_search_score(value, term.text, int(term.phrase))
+
+            title_score = score(Books.title)
+            title_scores.append(title_score)
+            matches = [title_score > 0]
+            exact = [title_score == 2]
+            for relationship, value in fields:
+                matches.append(relationship.any(score(value) > 0))
+                if relevance:
+                    exact.append(relationship.any(score(value) == 2))
+            all_terms.append(or_(*matches))
+            if relevance:
+                exact_terms.append(or_(*exact))
+
+        if parsed.bare_id is not None:
+            query = query.filter(or_(Books.id == parsed.bare_id, and_(*all_terms)))
+        elif all_terms:
+            query = query.filter(and_(*all_terms))
+        if not (all_terms or parsed.formats or parsed.book_id is not None):
+            return query.filter(false())
+        if relevance:
+            ranking = []
+            if parsed.bare_id is not None:
+                ranking.append((Books.id == parsed.bare_id).desc())
+            if title_scores:
+                phrase = ' '.join(term.text for term in parsed.terms)
+                ranking.extend([
+                    (func.cwa_search_normalize(Books.title) == phrase).desc(),
+                    (func.cwa_search_score(Books.title, phrase, 1) == 2).desc(),
+                    and_(*(score > 0 for score in title_scores)).desc(),
+                    sum(func.coalesce(score, 0) for score in title_scores).desc(),
+                    sum(cast(match, Integer) for match in exact_terms).desc(),
+                ])
+            query = query.order_by(*ranking, Books.sort, Books.id)
+        return query
+
+    @staticmethod
+    def book_has_format(fmt):
+        return Books.data.any(Data.format == fmt)
 
     def get_cc_columns(self, config, filter_config_custom_read=False):
         self.ensure_session()
@@ -1255,11 +1310,17 @@ class CalibreDB:
         return cc
 
     # read search results from calibre-database and return it (function is used for feed and simple search
-    def get_search_results(self, term, config, offset=None, order=None, limit=None, *join):
+    def get_search_results(self, term, config, offset=None, order=None, limit=None, *join, parsed=None):
         self.ensure_session()
-        order = order[0] if order else [Books.sort]
+        relevance = parsed is not None and order and order[1] == "relevance"
+        sort_columns = order[0] if order else [Books.sort]
         pagination = None
-        result = self.search_query(term, config, *join).order_by(*order).all()
+        query = self.search_query(term, config, *join, parsed=parsed, relevance=relevance)
+        if not relevance:
+            query = query.order_by(*sort_columns)
+            if parsed is not None:
+                query = query.order_by(Books.id)
+        result = query.all()
         result_count = len(result)
         if offset is not None and limit is not None:
             offset = int(offset)
@@ -1337,6 +1398,8 @@ class CalibreDB:
                 conn.create_function("title_sort", 1, _title_sort)
             conn.create_function('uuid4', 0, lambda: str(uuid4()))
             conn.create_function("lower", 1, lcase)
+            conn.create_function("cwa_search_score", 3, search_text_score)
+            conn.create_function("cwa_search_normalize", 1, normalize_search_text)
         except sqliteOperationalError:
             pass
 

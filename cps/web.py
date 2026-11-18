@@ -32,7 +32,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from . import constants, logger, isoLanguages, services, helper
 from . import db, ub, config, app
 from . import calibre_db, kobo_sync_status
-from .search import render_search_results, render_adv_search_results
+from .search import render_search_results, render_adv_search_results, library_search_error
+from .library_search import parse_library_search, SearchSyntaxError
 from .gdriveutils import getFileFromEbooksFolder, do_gdrive_download
 from .helper import check_valid_domain, check_email, check_username, \
     get_book_cover, get_series_cover_thumbnail, get_download_link, send_mail, generate_random_password, \
@@ -394,7 +395,7 @@ def get_sort_function(sort_param, data):
     if sort_param == 'hotasc':
         order = [func.count(ub.Downloads.book_id).asc()]
     if sort_param is None:
-        sort_param = "new"
+        sort_param = "relevance" if data == "search" else "new"
     return order, sort_param
 
 
@@ -1437,7 +1438,13 @@ def books_table():
 def list_books():
     off = int(request.args.get("offset") or 0)
     limit = int(request.args.get("limit") or config.config_books_per_page)
-    search_param = request.args.get("search")
+    search_param = request.args.get("search", "").strip()
+    parsed = None
+    if search_param:
+        try:
+            parsed = parse_library_search(search_param)
+        except SearchSyntaxError as error:
+            return jsonify(error=library_search_error(error)), 400
     sort_param = request.args.get("sort", "id")
     order = request.args.get("order", "").lower()
     state = None
@@ -1464,7 +1471,7 @@ def list_books():
     elif sort_param == "languages":
         order = [db.Languages.lang_code.asc()] if order == "asc" else [db.Languages.lang_code.desc()]
         join = db.books_languages_link, db.Books.id == db.books_languages_link.c.book, db.Languages
-    elif order and sort_param in ["sort", "title", "authors_sort", "series_index"]:
+    elif order in ("asc", "desc") and sort_param in ["sort", "title", "authors_sort", "series_index"]:
         order = [text(sort_param + " " + order)]
     elif not state:
         order = [db.Books.timestamp.desc()]
@@ -1473,7 +1480,7 @@ def list_books():
         calibre_db.common_filters(allow_show_archived=True)).count()
     if state is not None:
         if search_param:
-            books = calibre_db.search_query(search_param, config).all()
+            books = calibre_db.search_query(search_param, config, parsed=parsed).order_by(db.Books.id).all()
             filtered_count = len(books)
         else:
             query = calibre_db.generate_linked_query(config.config_read_column, db.Books)
@@ -1485,7 +1492,8 @@ def list_books():
                                                                     off,
                                                                     [order, ''],
                                                                     limit,
-                                                                    *join)
+                                                                    *join,
+                                                                    parsed=parsed)
     else:
         entries, __, __ = calibre_db.fill_indexpage_with_archived_books((int(off) / (int(limit)) + 1),
                                                                         db.Books,

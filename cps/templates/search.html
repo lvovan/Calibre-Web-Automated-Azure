@@ -2,6 +2,26 @@
 {% extends "layout.html" %}
 {% block body %}
 <div class="discover">
+    {% if page == 'search' %}
+      <details id="search-syntax"{% if not searchterm %} open{% endif %}>
+        <summary>{{_('Search syntax')}}</summary>
+        <ul>
+          <li>{{_('Words in any order:')}} <code>hits eye</code></li>
+          <li>{{_('Exact phrase:')}} <code>"hits your eye"</code></li>
+          <li>{{_('Book ID:')}} <code>id:949</code> / <code>#949</code></li>
+          <li>{{_('Format:')}} <code>.epub</code> / <code>format:epub</code></li>
+          <li>{{_('Combine words and filters:')}} <code>hits eye format:epub</code></li>
+        </ul>
+      </details>
+    {% endif %}
+    {% if search_filters %}
+      {% if search_filters.book_id %}
+        <p>{{_('Book ID:')}} <code>{{search_filters.book_id}}</code></p>
+      {% endif %}
+      {% if search_filters.formats %}
+        <p>{{_('Format:')}} <code>{{search_filters.formats|join(', ')}}</code></p>
+      {% endif %}
+    {% endif %}
     {% if entries|length < 1 %}
       <h2>{{_('No Results Found')}}</h2>
       <p>{{_('Search Term:')}} {{adv_searchterm}}</p>
@@ -28,6 +48,9 @@
         {% endif %}
       {% endif %}
       <div class="filterheader hidden-xs"><!-- ToDo: Implement filter for search results -->
+        {% if page == 'search' %}
+        <a id="relevance" class="btn btn-primary{% if order == 'relevance' %} active{% endif %}" href="{{url_for('web.books_list', data=page, sort_param='relevance', query=query)}}">{{_('Relevance')}}</a>
+        {% endif %}
         <a id="new" data-toggle="tooltip" title="{{_('Sort according to book date, newest first')}}" class="btn btn-primary{% if order == "new" %} active{% endif%}" href="{{url_for('web.books_list', data=page, sort_param='new', query=query)}}"><span class="glyphicon glyphicon-sort-by-order"></span></a>
         <a id="old" data-toggle="tooltip" title="{{_('Sort according to book date, oldest first')}}" class="btn btn-primary{% if order == "old" %} active{% endif%}" href="{{url_for('web.books_list', data=page, sort_param='old', query=query)}}"><span class="glyphicon glyphicon-sort-by-order-alt"></span></a>
         <a id="asc" data-toggle="tooltip" title="{{_('Sort title in alphabetical order')}}" class="btn btn-primary{% if order == "abc" %} active{% endif%}" href="{{url_for('web.books_list', data=page, sort_param='abc', query=query)}}"><span class="glyphicon glyphicon-font"></span><span class="glyphicon glyphicon-sort-by-alphabet"></span></a>

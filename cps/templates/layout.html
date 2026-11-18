@@ -116,8 +116,8 @@
         {% if current_user.is_authenticated or g.allow_anonymous %}
           <form class="navbar-form navbar-left" role="search" action="{{url_for('search.simple_search')}}" method="GET">
             <div class="form-group input-group input-group-sm">
-              <label for="query" class="sr-only">{{_('Search')}}</label>
-              <input type="text" class="form-control" id="query" name="query" placeholder="{{_('Search Library')}}" value="{{searchterm}}">
+              <label for="query" class="sr-only">{{_('Search Library')}}</label>
+              <input type="text" class="form-control" id="query" name="query" placeholder="{{ _('Search words, "exact phrase", id:949, or format:epub') }}" value="{{searchterm}}" maxlength="256">
               <span class="input-group-btn">
                 <button type="submit" id="query_submit" class="btn btn-default">{{_('Search')}}</button>
               </span>
@@ -128,6 +128,7 @@
           {% if current_user.is_authenticated or g.allow_anonymous %}
           <ul class="nav navbar-nav ">
             <li><a href="{{url_for('search.advanced_search')}}" id="advanced_search"><span class="glyphicon glyphicon-search" style="padding-left: 10px; padding-right: 6px;"></span><span class="hidden-sm"> {{_('Advanced Search')}}</span></a></li>
+            <li><a href="{{url_for('search.simple_search')}}#search-syntax" aria-label="{{_('Search syntax')}}" title="{{_('Search syntax')}}"><span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span></a></li>
           </ul>
           {% endif %}
           <ul class="nav navbar-nav navbar-right" id="main-nav">

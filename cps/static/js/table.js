@@ -639,6 +639,14 @@ $(function() {
         maintainMetaData: true,
     clickToSelect: true,
         responseHandler: responseHandler,
+        onLoadSuccess: function () {
+            $("#book-table-search-error").prop("hidden", true).text("");
+        },
+        onLoadError: function (status, xhr) {
+            if (status === 400 && xhr && xhr.responseJSON && xhr.responseJSON.error) {
+                $("#book-table-search-error").text(xhr.responseJSON.error).prop("hidden", false);
+            }
+        },
         columns: column,
         formatNoMatches: function () {
             return "";

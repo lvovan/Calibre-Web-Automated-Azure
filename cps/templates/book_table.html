@@ -38,6 +38,7 @@
 {% block body %}
 <div class="discover">
   <h2 class="{{page}}">{{_(title)}}</h2>
+    <p id="book-table-search-error" class="alert alert-danger" role="alert" hidden></p>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row form-group" style="display: inline-block;">
       <div class="btn btn-default disabled" id="merge_books" aria-disabled="true">

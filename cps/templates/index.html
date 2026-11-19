@@ -40,6 +40,9 @@
     }
 }
 </style>
+{% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+<link href="{{ url_for('static', filename='css/bulk-edit.css') }}" rel="stylesheet">
+{% endif %}
 {% endblock %}
 {% block body %}
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -187,7 +190,19 @@
     </div>
    {% endif %}
   {% if show_shelf_actions %}</div>{% endif %}
-  <div class="row display-flex">
+  {% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+  <div id="bulk-book-toolbar" class="bulk-book-toolbar">
+    <button type="button" class="btn btn-default" id="bulk-book-select" aria-pressed="false">{{ _('Select') }}</button>
+    <div id="bulk-book-actions" hidden>
+      <label><input type="checkbox" id="bulk-book-all"> {{ _('Select all shown') }}</label>
+      <span id="bulk-book-count" role="status" aria-live="polite"></span>
+      <button type="button" class="btn btn-default" id="bulk-book-clear">{{ _('Clear selection') }}</button>
+      <button type="button" class="btn btn-primary" id="bulk-book-edit" disabled>{{ _('Edit') }}</button>
+    </div>
+  </div>
+  <p id="bulk-book-notice" role="status" aria-live="polite"></p>
+  {% endif %}
+  <div class="row display-flex" data-bulk-book-grid>
     {% if entries[0] %}
     {% for entry in entries %}
     <div class="col-sm-3 col-lg-2 col-xs-6 book session" id="books">
@@ -260,8 +275,17 @@
   </div>
 </div>
 {% endblock %}
+{% block modal %}
+{{ super() }}
+{% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+{% include 'bulk_edit.html' %}
+{% endif %}
+{% endblock %}
 {% block js %}
 {{ super() }}
+{% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+<script src="{{ url_for('static', filename='js/bulk-edit.js') }}"></script>
+{% endif %}
 {% if page == 'magicshelf' %}
 <script>
 $(document).ready(function() {

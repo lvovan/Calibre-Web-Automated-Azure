@@ -77,7 +77,7 @@ jobs:
           node-version: '22'
 
       - name: Test EPUB reader behavior
-        run: node --test tests/unit/test_epub_reader.js tests/unit/test_progress_sync.js
+        run: node --test tests/unit/test_epub_reader.js tests/unit/test_progress_sync.js tests/unit/test_bulk_edit.js
 
       - name: Run smoke and unit tests
         env:

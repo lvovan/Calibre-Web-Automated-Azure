@@ -1,0 +1,74 @@
+<div class="modal fade bulk-workbench" id="bulkBookModal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="bulkBookHeading">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="{{ _('Close') }}"><span aria-hidden="true">&times;</span></button>
+        <h2 class="modal-title" id="bulkBookHeading">{{ _('Edit selected books') }}</h2>
+        <p>{{ _('Shared metadata, individual titles, and reading order') }}</p>
+      </div>
+      <nav class="bw-tabs" id="bw-tabs" aria-label="{{ _('Metadata categories') }}"></nav>
+      <div class="bw-layout">
+        <section class="bw-editor" id="bw-editor" aria-label="{{ _('Shared metadata') }}"></section>
+        <section class="bw-results" aria-label="{{ _('Individual titles and reading order') }}">
+          <div class="bw-section-heading"><h3>{{ _('Individual titles & reading order') }}</h3><span id="bw-number-state"></span></div>
+          <p class="bw-hint">{{ _('Rename each book here. Move books to define their order; titles stay attached to the book. Auto-numbering affects selected books only.') }}</p>
+          <div class="bw-table-scroll">
+            <table class="bw-sequence"><thead><tr><th>{{ _('Book title') }}</th><th>{{ _('Was') }}</th><th>{{ _('Will be') }}</th><th>{{ _('Order') }}</th></tr></thead><tbody id="bw-sequence"></tbody></table>
+          </div>
+          <section class="bw-changes" aria-live="polite"><h3>{{ _('Pending changes') }}</h3><div id="bw-changes"></div></section>
+          <h3>{{ _('Result details') }}</h3><div id="bw-preview"></div>
+        </section>
+      </div>
+      <div id="bw-error" class="bw-error" role="alert" tabindex="-1" hidden></div>
+      <div id="bw-outcome" class="bw-outcome" role="status" aria-live="polite" hidden></div>
+      <div class="modal-footer">
+        <span id="bw-count" role="status"></span>
+        <button type="button" class="btn btn-default" data-dismiss="modal" id="bw-cancel">{{ _('Cancel') }}</button>
+        <button type="button" class="btn btn-primary" id="bw-save" disabled>{{ _('Apply to selected books') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="bulk-book-config">{{ {
+  'url': url_for('edit-book.bulk_books'),
+  'groups': [{'id':'details','label':_('Book details')}, {'id':'series','label':_('Series & order')},
+             {'id':'organize','label':_('Organize')}, {'id':'content','label':_('Description & cover')},
+             {'id':'custom','label':_('Custom fields')}, {'id':'system','label':_('File & system')}],
+  'text': {
+    'select': _('Select'), 'done': _('Done selecting'), 'selected': _('%(count)s selected', count='%(count)s'),
+    'limit': _('Select at most 100 books at a time.'), 'selectBook': _('Select book %(id)s', id='%(id)s'),
+    'loadError': _('Could not load the selected books. Check your connection and sign-in, then try again.'),
+    'saveError': _('The save response could not be confirmed. Reload the page before retrying; some books may already have been saved.'),
+    'loading': _('Loading selected books...'), 'saving': _('Saving changes...'),
+    'editBooks': _('Edit %(count)s books', count='%(count)s'), 'apply': _('Apply to %(count)s books', count='%(count)s'),
+    'sharedHint': _('Common values are prefilled. Mixed values are blank. Untouched fields stay unchanged. Clear removes a value; Reset keeps the original.'),
+    'mixed': _('Mixed values - keep existing'), 'empty': _('Not set'), 'common': _('Shared by all selected books'),
+    'mixedLabel': _('Mixed values'), 'changed': _('Will apply to all selected books.'),
+    'readonly': _('Read-only'), 'clear': _('Clear'), 'reset': _('Reset'),
+    'titleFor': _('Title for book %(id)s', id='%(id)s'), 'individualTitle': _('Individual title'), 'resetTitle': _('Reset title'),
+    'onlyThis': _('Only this book will be renamed.'), 'titleHelp': _('Edit this book only. Individual edits override the optional shared title.'),
+    'titleRequired': _('Enter a title for book %(id)s, or reset it.', id='%(id)s'), 'was': _('Was: %(title)s', title='%(title)s'),
+    'up': _('Up'), 'down': _('Down'), 'autoNumber': _('Auto-number within the series'),
+    'start': _('Start at'), 'increment': _('Increment'), 'order': _('Order'),
+    'selectionOrder': _('Selection order'), 'titleOrder': _('Title A-Z'), 'seriesOrder': _('Current series number'), 'customOrder': _('Custom order'),
+    'numberOn': _('Auto-number on'), 'numberOff': _('Auto-number off'),
+    'numberHelp': _('A shared Series ID sets the same number on every book. Auto-numbering assigns sequential numbers instead and does not shift other books.'),
+    'noChanges': _('No changes yet.'), 'titleChanges': _('%(count)s individual titles', count='%(count)s'),
+    'fieldChanges': _('%(count)s shared fields', count='%(count)s'), 'noCustom': _('No custom columns are configured for this library.'),
+    'listHelp': _('Comma-separated list. Editing replaces the list on each selected book.'),
+    'authorHelp': _('Separate multiple authors with &. Existing author names are reused without renaming other books.'),
+    'sharedTitleHelp': _('Optional baseline for all selected books. Individual title edits on the right take precedence.'),
+    'shelfHelp': _('Only shelves you can manage are listed. Other shelf memberships are preserved.'),
+    'identifiers': _('Identifiers'), 'identifierHelp': _('Only edited identifier types change. Unique ISBNs should normally be left untouched.'),
+    'identifierType': _('Additional identifier type'), 'addIdentifier': _('Add type'), 'invalidIdentifier': _('Enter a new identifier type using letters, numbers, underscores, or hyphens.'),
+    'coverHelp': _('Choose one cover for all selected books. Reset preserves their original covers.'), 'uploadCover': _('Upload a shared cover'),
+    'resetCover': _('Reset uploaded cover'), 'coverFile': _('Cover file'), 'invalidCover': _('Choose a JPEG, PNG, or WebP cover image.'),
+    'systemHelp': _('Per-book and device-generated values cannot be bulk edited.'),
+    'id': _('Book ID'), 'uuid': _('UUID'), 'added': _('Date added'), 'modified': _('Last modified'),
+    'formats': _('Formats & file sizes'), 'progress': _('KOReader Progress'), 'progressUpdated': _('Progress synced'),
+    'saved': _('Saved'), 'unchanged': _('Unchanged'), 'error': _('Error'), 'skipped': _('Not attempted'),
+    'finished': _('Changes saved. Close to refresh the library.'),
+    'partial': _('Not all changes were saved. Review the results below. Close and reload before retrying.'),
+    'reload': _('Close and reload'), 'cover': _('Cover'), 'details': _('Details'), 'cancel': _('Cancel')
+  }
+}|tojson }}</script>

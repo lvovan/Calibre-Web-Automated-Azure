@@ -242,6 +242,15 @@ def edit_list_book(param):
     vals = request.form.to_dict()
     return edit_book_param(param, vals)
 
+
+@editbook.route('/ajax/bulk-books', methods=['GET', 'POST'])
+@user_login_required
+@edit_required
+def bulk_books():
+    from .bulk_edit import load_workbench, save_workbench
+    return load_workbench() if request.method == 'GET' else save_workbench()
+
+
 @editbook.route("/ajax/editselectedbooks", methods=['POST'])
 @login_required_if_no_ano
 @edit_required

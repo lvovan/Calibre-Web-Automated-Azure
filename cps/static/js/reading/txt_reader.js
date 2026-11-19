@@ -116,6 +116,9 @@ $(document).ready(function() {
     function restoreProgress() {
         if (sync) goToFraction(fractionFor(sync.state));
     }
+    $("#sync-now").on("click", function() {
+        if (sync) sync.syncNow();
+    });
     function saveProgress() {
         if (!sync) return;
         var fraction = currentPage() / pageCount();

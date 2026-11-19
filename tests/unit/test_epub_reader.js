@@ -142,14 +142,17 @@ test("manga can migrate percentage progress without a text index", async () => {
 
 const mangaSource = fs.readFileSync(path.join(__dirname, "..", "..", "cps", "static", "js", "reading", "epub-manga.js"), "utf8");
 
-function mangaHarness({rtl = false, fail = false, cwa = true} = {}) {
+function mangaHarness({rtl = false, fail = false, cwa = true, documents = []} = {}) {
     const stage = {style: {}, replaceChildren(...images) { this.children = images; }, remove() {}};
     const element = {classList: {add() {}}, appendChild() {}, scrollTo() {}};
     class Image {
         set src(value) { this.url = value; queueMicrotask(() => fail ? this.onerror?.() : this.onload?.()); }
         removeAttribute() {}
     }
-    const pages = Array.from({length: 30}, (_, i) => ({index: i, image: "images/p" + i + ".png", href: "p" + i + ".xhtml"}));
+    const frame = () => ({tag: "iframe", attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
+        removeAttribute() {}});
+    const pages = Array.from({length: 30}, (_, i) => documents.includes(i) ? {index: i, href: "p" + i + ".xhtml"} :
+        ({index: i, image: "images/p" + i + ".png", href: "p" + i + ".xhtml"}));
     const sections = pages.map((page, i) => ({index: i, cfiBase: "/6/" + (2 * i + 2), href: page.href}));
     class Book {
         constructor() {
@@ -166,7 +169,7 @@ function mangaHarness({rtl = false, fail = false, cwa = true} = {}) {
     const calibre = {manga: true, renditionOptions: {spread: "none"},
         epubData: {baseUrl: "/epub/1/v1/", pages, direction: rtl ? "rtl" : "ltr"}};
     vm.runInNewContext(mangaSource, {calibre, ePub: {Book}, Image, DOMException, console, window: {},
-        document: {createElement: () => stage, getElementById: () => element},
+        document: {createElement: name => name === "iframe" ? frame() : stage, getElementById: () => element},
         RSVP: {EventTarget: {mixin(target) {
             target.on = EventEmitter.prototype.on;
             target.trigger = EventEmitter.prototype.emit;
@@ -207,6 +210,29 @@ test("page failures are surfaced through displayerror", async () => {
     rendition.on("displayerror", value => { error = value; });
     await assert.rejects(rendition.display(), /Unable to load EPUB page/);
     assert.ok(error);
+});
+
+test("text pages inside manga are framed without scripts and progress advances", async () => {
+    const {rendition, stage} = mangaHarness({documents: [1]});
+    await rendition.display();
+    assert.equal(rendition.currentLocation().end.percentage, 1 / 30);
+    await rendition.next();
+    const [page] = stage.children;
+    assert.equal(page.tag, "iframe");
+    assert.equal(page.attributes.sandbox, "allow-same-origin");
+    assert.equal(page.src, "/epub/1/v1/p1.xhtml");
+    await rendition.next();
+    assert.equal(rendition.currentLocation().end.percentage, 3 / 30);
+});
+
+test("image-page progress uses the renderer's page percentage", async () => {
+    const h = progressHarness({manga: true});
+    h.calibre.imagePages = true;
+    await h.finish();
+    h.rendition.currentLocation = () => ({start: {cfi: "epubcfi(/6/2!/4)", index: 0},
+        end: {cfi: "epubcfi(/6/2!/4)", index: 0, percentage: 0.25}});
+    h.rendition.emit("relocated", h.rendition.currentLocation());
+    assert.equal(h.nodes.progress.textContent, "25%");
 });
 
 test("books outside CWA retain their original renderTo behavior", () => {

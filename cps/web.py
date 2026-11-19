@@ -2930,7 +2930,7 @@ def read_book(book_id, book_format):
         except Exception as e:
             log.debug(f"Failed to load KOReader progress for book {book_id}: {e}")
     from .progress_syncing.protocols.kosync import reader_progress_config
-    progress_sync = reader_progress_config(book_id)
+    progress_sync = reader_progress_config(book_id, book_format)
     # Track read activity
     if current_user.is_authenticated:
         try:

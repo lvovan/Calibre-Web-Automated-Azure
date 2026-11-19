@@ -34,6 +34,15 @@
         });
         if (!sync) return;
 
+        const button = window.document && window.document.getElementById("cwaSyncNow");
+        if (button) {
+            button.addEventListener("click", () => {
+                if (app.secondaryToolbar) app.secondaryToolbar.close();
+                button.disabled = true;
+                Promise.resolve(sync.syncNow()).catch(() => {}).then(() => { button.disabled = false; });
+            });
+        }
+
         app.eventBus.on("documentinit", () => {
             const state = sync.state;
             // An explicit #page= link and this browser's own last position (kept by pdf.js) win.

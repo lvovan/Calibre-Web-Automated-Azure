@@ -41,7 +41,7 @@ from flask import flash
 from . import logger, ub, isoLanguages
 from .pagination import Pagination
 from .string_helper import strip_whitespaces
-from .library_search import normalize_search_text, search_text_score
+from .library_search import fuzzy_term, normalize_search_text, search_text_score
 
 log = logger.create()
 
@@ -1234,32 +1234,41 @@ class CalibreDB:
         query = query.options(joinedload(Books.data))
         return query.filter(self.common_filters(True)).filter(or_(*filter_expression))
 
-    def _natural_search_query(self, query, parsed, columns, relevance):
+    def _natural_search_query(self, query, parsed, columns, relevance, fuzzy=None):
+        if fuzzy is None:
+            result = self._natural_search_query(query, parsed, columns, relevance, False)
+            # Nothing as typed: retry tolerating typos in titles, authors and series.
+            if any(not term.phrase and fuzzy_term(term.text) for term in parsed.terms) and result.first() is None:
+                return self._natural_search_query(query, parsed, columns, relevance, True)
+            return result
         query = query.options(joinedload(Books.data)).filter(self.common_filters(True))
         if parsed.book_ids:
             query = query.filter(Books.id.in_(parsed.book_ids))
         for fmt in parsed.formats:
             query = query.filter(self.book_has_format(fmt))
 
-        fields = [(Books.authors, Authors.name), (Books.tags, Tags.name),
-                  (Books.series, Series.name), (Books.publishers, Publishers.name)]
+        # (relationship, column, typo tolerant)
+        fields = [(Books.authors, Authors.name, fuzzy), (Books.tags, Tags.name, False),
+                  (Books.series, Series.name, fuzzy), (Books.publishers, Publishers.name, False)]
         for column in columns:
             if column.datatype not in ("datetime", "rating", "bool", "int", "float"):
-                fields.append((getattr(Books, 'custom_column_' + str(column.id)), cc_classes[column.id].value))
+                fields.append((getattr(Books, 'custom_column_' + str(column.id)), cc_classes[column.id].value, False))
 
         all_terms = []
         title_scores = []
         exact_terms = []
         for term in parsed.terms:
-            def score(value):
+            def score(value, tolerant=False, term=term):
+                if tolerant:
+                    return func.cwa_search_score(value, term.text, int(term.phrase), 1)
                 return func.cwa_search_score(value, term.text, int(term.phrase))
 
-            title_score = score(Books.title)
+            title_score = score(Books.title, fuzzy)
             title_scores.append(title_score)
             matches = [title_score > 0]
             exact = [title_score == 2]
-            for relationship, value in fields:
-                matches.append(relationship.any(score(value) > 0))
+            for relationship, value, tolerant in fields:
+                matches.append(relationship.any(score(value, tolerant) > 0))
                 if relevance:
                     exact.append(relationship.any(score(value) == 2))
             all_terms.append(or_(*matches))
@@ -1399,6 +1408,7 @@ class CalibreDB:
             conn.create_function('uuid4', 0, lambda: str(uuid4()))
             conn.create_function("lower", 1, lcase)
             conn.create_function("cwa_search_score", 3, search_text_score)
+            conn.create_function("cwa_search_score", 4, search_text_score)
             conn.create_function("cwa_search_normalize", 1, normalize_search_text)
         except sqliteOperationalError:
             pass

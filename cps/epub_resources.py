@@ -23,6 +23,12 @@ _cache = OrderedDict()
 _cache_lock = threading.Lock()
 _RASTER_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"}
 _DOCUMENT_TYPES = {"application/xhtml+xml", "image/svg+xml"}
+_INVISIBLE = {"head", "style", "script", "title", "desc", "metadata", "noscript"}
+_ACTIVE = {"script", "video", "audio", "canvas", "iframe", "object", "embed", "form", "input", "foreignObject"}
+# Share of reading-order pages that must be lone images before the image renderer is used.
+_IMAGE_PAGE_SHARE = 0.8
+# Inline styling that changes how the image is drawn cannot be dropped.
+_TRANSFORM = re.compile(r"transform|rotate|writing-mode|clip-path|mask", re.IGNORECASE)
 
 
 class EpubResourceError(Exception):
@@ -73,8 +79,19 @@ def _tag(node):
     return node.tag.rsplit("}", 1)[-1]
 
 
+def _visible_text(node):
+    if _tag(node) in _INVISIBLE:
+        return ""
+    return (node.text or "") + "".join(_visible_text(child) + (child.tail or "") for child in node)
+
+
 def _inspect_page(archive, item, resources):
-    """Only flatten unstyled, single-raster wrappers; preserve everything else as XHTML."""
+    """Return (image_focused, image) where image is set only for a page that shows nothing but one raster.
+
+    Comic/manga converters (KCC, Calibre) wrap each scan in styled XHTML, often inside an SVG
+    <image>; such pages can be shown as the raster alone. Pages with any visible text, several
+    images or interactive/media content keep their XHTML.
+    """
     if item["mime"] in _RASTER_TYPES:
         return True, item["href"]
     if item["mime"] not in _DOCUMENT_TYPES:
@@ -82,18 +99,19 @@ def _inspect_page(archive, item, resources):
     doc = _xml(archive, item["href"])
     body = next((node for node in doc.iter() if _tag(node) == "body"), doc)
     images = [node for node in body.iter() if _tag(node) in ("img", "image")]
-    text = "".join(body.itertext()).strip()
+    text = " ".join(_visible_text(body).split())
     image_focused = bool(images) and len(text) <= 80
-    simple = (not text and len(images) == 1 and _tag(doc) == "html"
-              and all(_tag(node) in ("body", "div", "p", "img", "span") for node in body.iter())
-              and not any(_tag(node) in ("style", "link", "script") or
-                          any(key in node.attrib for key in ("style", "hidden"))
-                          for node in doc.iter()))
-    if simple:
-        image = _resolve(item["href"], images[0].get("src", ""))
-        if resources.get(image) in _RASTER_TYPES:
-            return image_focused, image
-    return image_focused, None
+    if text or len(images) != 1 or any(_tag(node) in _ACTIVE or _TRANSFORM.search(node.get("style", "") + (
+            node.text or "" if _tag(node) == "style" else "")) for node in doc.iter()):
+        return image_focused, None
+    image = images[0]
+    href = image.get("src") if _tag(image) == "img" else (
+        image.get("{http://www.w3.org/1999/xlink}href") or image.get("href"))
+    try:
+        target = _resolve(item["href"], href or "")
+    except EpubResourceError:
+        return image_focused, None
+    return image_focused, target if resources.get(target) in _RASTER_TYPES else None
 
 
 def describe(path):
@@ -157,11 +175,11 @@ def describe(path):
             recommended = (layout == "pre-paginated" or
                            sum(result[0] for result in inspected.values()) / len(inspected) >= 0.8)
             pages = []
-            if (recommended and all(result[1] for result in inspected.values()) and
-                    all(node.get("linear", "yes") != "no" for node in spine_node)):
+            if recommended and sum(bool(result[1]) for result in inspected.values()) / len(inspected) >= 0.6:
                 inspected_bytes = 0
                 for index, item in enumerate(spine):
-                    inspected_bytes += archive.getinfo(item["href"]).file_size
+                    if item["mime"] not in _RASTER_TYPES:
+                        inspected_bytes += archive.getinfo(item["href"]).file_size
                     if inspected_bytes > MAX_INSPECTION_BYTES:
                         pages = []
                         break
@@ -171,10 +189,16 @@ def describe(path):
                             result = _inspect_page(archive, item, resources)
                         except (KeyError, ET.ParseError, EpubResourceError):
                             result = (False, None)
-                    if not result[1] or item["properties"]:
+                    page = {"index": item["index"], "href": item["href"]}
+                    if result[1]:
+                        page["image"] = result[1]
+                    elif item["mime"] not in _DOCUMENT_TYPES:
                         pages = []
                         break
-                    pages.append({"index": item["index"], "href": item["href"], "image": result[1]})
+                    pages.append(page)
+                # Mostly-text books keep the EPUB renderer; a few text pages (credits, ads) are framed.
+                if pages and sum("image" in page for page in pages) / len(pages) < _IMAGE_PAGE_SHARE:
+                    pages = []
             result = {"revision": version, "opf": opf, "resources": resources,
                       "layout": layout, "direction": spine_node.get("page-progression-direction", "ltr"),
                       "manga": recommended, "pages": pages}

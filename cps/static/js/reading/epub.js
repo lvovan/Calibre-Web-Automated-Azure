@@ -73,6 +73,13 @@ var reader;
         onSaved: state => calibre.onProgressSaved && calibre.onProgressSaved(state)
     });
     const remote = calibre.sync && calibre.sync.state;
+    const syncButton = document.getElementById("sync-now");
+    if (syncButton && calibre.sync) {
+        syncButton.addEventListener("click", function () {
+            syncButton.disabled = true;
+            calibre.sync.syncNow().finally(() => { syncButton.disabled = false; });
+        });
+    }
     const localIsCurrent = localRecord && remote && (
         (typeof localRecord.timestamp === "number" && localRecord.timestamp >= remote.timestamp) ||
         (localRecord.pending && localRecord.savedAt > remote.timestamp * 1000));
@@ -136,6 +143,7 @@ var reader;
     });
     const zoomControl = document.getElementById("manga-zoom");
     const imageMode = typeof reader.rendition.setZoom === "function";
+    calibre.imagePages = imageMode;
     document.getElementById("manga-controls").hidden = !imageMode;
     if (imageMode) {
         const savedZoom = Number(calibre.storage.get(calibre.storageKey + ".zoom")) || 1;
@@ -147,6 +155,46 @@ var reader;
         });
         ["touchstart", "touchend"].forEach(name => document.getElementById("viewer").addEventListener(name,
             event => reader.rendition.emit(name, event), {passive: true}));
+        // The sidebar lists every page; chapter titles from the book's TOC label the pages they start on.
+        reader.book.loaded.navigation.then(function (navigation) {
+            const chapters = new Map();
+            const flatten = items => items.forEach(item => {
+                const section = reader.book.spine.get(item.href);
+                if (section && !chapters.has(section.index)) chapters.set(section.index, item.label.trim());
+                if (item.subitems) flatten(item.subitems);
+            });
+            flatten((navigation && navigation.toc) || []);
+            const list = document.createElement("ul");
+            list.id = "manga-pages";
+            calibre.epubData.pages.forEach(function (page, index) {
+                const item = document.createElement("li");
+                item.className = "list_item manga-page";
+                item.dataset.index = String(page.index);
+                const link = document.createElement("a");
+                link.className = "toc_link";
+                link.href = "#";
+                const chapter = chapters.get(page.index);
+                link.textContent = calibre.messages.page.replace("%(page)s", index + 1) + (chapter ? " \u2013 " + chapter : "");
+                link.addEventListener("click", function (event) {
+                    event.preventDefault();
+                    reader.rendition.display(page.index);
+                });
+                item.appendChild(link);
+                list.appendChild(item);
+            });
+            document.getElementById("tocView").replaceChildren(list);
+            const mark = location => {
+                if (!location || !location.start) return;
+                list.querySelectorAll(".currentChapter").forEach(item => item.classList.remove("currentChapter"));
+                const current = list.querySelector('[data-index="' + location.start.index + '"]');
+                if (current) {
+                    current.classList.add("currentChapter");
+                    current.scrollIntoView({block: "nearest"});
+                }
+            };
+            reader.rendition.on("relocated", mark);
+            mark(reader.rendition.currentLocation());
+        }).catch(error => console.warn("Could not build the page list", error));
     }
 
     function showReaderError(message, error) {

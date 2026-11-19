@@ -37,11 +37,24 @@ Each request rechecks library visibility and viewer permissions; cached resource
 Individual resources are limited to 64 MiB. Google Drive books retain the archive-based loading path.
 
 Reader settings offer **Auto / Text / Manga**, saved per user and book. Auto samples the reading
-order, not the title or archive size. Simple, unstyled single-image pages use a bounded image renderer
-with zoom, optional spreads and RTL navigation; styled pages, SVG, captions and mixed content retain
-the EPUB engine and original markup. Manga uses section/page progress without text indexing. Novels
+order, not the title or archive size. Comic pages made of a single image (including converter output
+with stylesheets or an SVG image wrapper) use a bounded image renderer with zoom, optional spreads and
+RTL navigation; other pages of such books (credits, chapter titles) are shown in script-free frames.
+The menu lists the pages, grouped by chapter. Books with mostly styled, captioned or mixed content
+retain the EPUB engine and original markup. Manga uses page progress without text indexing. Novels
 keep the text renderer and text-based percentages, with one revision-aware location index and exact
 CFI position restoration. Existing bookmarks and percentage-based progress can still be restored.
+
+The PDF reader has a **Manga mode** (in the tools menu): one page at a time fitted to the screen, page
+turns by tapping the screen edges, swiping or arrow keys, optional right-to-left reading, and the next
+pages loaded ahead. It turns on automatically for PDFs without text (scans and comics) unless the
+user switched it off for that book.
+
+### Library search
+
+Search matches whole words, plurals and quoted phrases. When nothing matches as typed, it retries
+tolerating typos (one edit for words of 4–7 letters, two from 8, missing spaces and cut-off words) in
+titles, authors and series. Quoted phrases always match exactly.
 
 ### Reading progress across devices
 
@@ -54,6 +67,13 @@ EPUB, a page number for PDFs and comics), so web readers and KOReader devices re
 pages. Limitations: TXT exchanges only the percentage with devices; DJVU and anonymous browsing are not
 synchronized; one position is kept per book across all of its formats. With KOReader sync disabled,
 the readers keep their previous browser-local behavior.
+
+Each reader has a **Sync progress now** action (EPUB settings, comic menu, PDF tools menu, TXT ↻
+button) that saves the current position and opens a newer one from another device. KOReader
+identifies a book by a hash of its file; copies downloaded before KOReader sync was enabled (or
+modified since) have hashes the library does not know. When such a device's latest EPUB position
+resolves exactly in the book being read, the EPUB reader offers to continue from it and, if accepted,
+links that hash to the book so both sides stay in sync from then on.
 
 ### Azure-specific settings (set by Bicep)
 

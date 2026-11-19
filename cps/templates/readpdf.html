@@ -52,10 +52,20 @@ See https://github.com/adobe-type-tools/cmap-resources
     });
     </script>
     <script>
-      window.cwaPdf = {progressSync: {{ progress_sync|tojson }}, csrfToken: {{ csrf_token()|tojson }}};
+      window.cwaPdf = {progressSync: {{ progress_sync|tojson }}, csrfToken: {{ csrf_token()|tojson }},
+                       bookId: {{ pdffile|tojson }}, userId: {{ current_user.id|string|tojson }}};
     </script>
+    <style>
+      #cwaMangaMode::before { -webkit-mask-image: var(--secondaryToolbarButton-scrollPage-icon); mask-image: var(--secondaryToolbarButton-scrollPage-icon); }
+      #cwaMangaRtl::before { -webkit-mask-image: var(--secondaryToolbarButton-spreadEven-icon); mask-image: var(--secondaryToolbarButton-spreadEven-icon); transform: scaleX(-1); }
+      #cwaSyncNow::before { -webkit-mask-image: var(--secondaryToolbarButton-rotateCw-icon); mask-image: var(--secondaryToolbarButton-rotateCw-icon); }
+      #cwaMangaRtl[hidden] { display: none; }
+      body.cwa-manga #viewerContainer { background: #111; }
+      body.cwa-manga .pdfViewer .page { border: 0; margin: 0 auto; box-shadow: none; }
+    </style>
     <script src="{{ url_for('static', filename='js/reading/progress-sync.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reading/pdf-progress.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/reading/pdf-manga.js') }}"></script>
 
     <script src="{{ url_for('static', filename='js/libs/viewer.mjs') }}" type="module"></script>
 
@@ -282,6 +292,20 @@ See https://github.com/adobe-type-tools/cmap-resources
                 <span data-l10n-id="pdfjs-spread-even-button-label">Even Spreads</span>
               </button>
             </div>
+
+            <div class="horizontalToolbarSeparator"></div>
+
+            <button id="cwaMangaMode" class="secondaryToolbarButton" title="{{_('Manga mode: one page at a time, fit to screen, tap or swipe to turn pages')}}" tabindex="69" role="switch" aria-checked="false">
+              <span>{{_('Manga mode')}}</span>
+            </button>
+            <button id="cwaMangaRtl" class="secondaryToolbarButton" title="{{_('Read right-to-left in manga mode')}}" tabindex="69" role="switch" aria-checked="false">
+              <span>{{_('Right-to-left')}}</span>
+            </button>
+{% if progress_sync %}
+            <button id="cwaSyncNow" class="secondaryToolbarButton" title="{{_('Sync progress now')}}" tabindex="69">
+              <span>{{_('Sync progress now')}}</span>
+            </button>
+{% endif %}
 
             <div class="horizontalToolbarSeparator"></div>
 

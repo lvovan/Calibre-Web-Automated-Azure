@@ -62,13 +62,26 @@ def test_image_epub_uses_spine_order_and_does_not_read_images(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("body", ["<p>" + "Novel text. " * 100 + "</p>",
-                                 '<svg xmlns="http://www.w3.org/2000/svg"><image href="images/p0.png"/></svg>',
                                  '<div style="transform:rotate(90deg)"><img src="images/p0.png"/></div>',
                                  '<img src="images/p0.png"/><p>Caption</p>',
                                  '<img src="images/p0.png"/><img src="images/p1.png"/>'])
 def test_complex_pages_are_not_flattened(tmp_path, body):
     path = make_epub(tmp_path / "complex.epub", bodies=[body] * 5)
     assert epub.describe(path)["pages"] == []
+
+
+def test_converter_comic_pages_use_the_image_renderer(tmp_path):
+    # KCC/Calibre comic output: stylesheets, viewport sizing, SVG wrappers and explicit spreads.
+    kcc = ('<div style="text-align:center;top:0.0%;"><img width="1072" height="1448" src="images/p{0}.png"/></div>')
+    calibre_svg = ('<div><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+                   'viewBox="0 0 10 10"><title>Page</title><image width="10" height="10" xlink:href="images/p{0}.png"/></svg></div>')
+    bodies = [(kcc if i % 2 else calibre_svg).format(i) for i in range(9)] + ["<h1>Credits</h1><p>Scans by someone</p>"]
+    path = make_epub(tmp_path / "kcc.epub", bodies=bodies, metadata='<meta property="rendition:layout">pre-paginated</meta>')
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.writestr("OEBPS/style.css", "img{max-width:100%}")
+    pages = epub.describe(path)["pages"]
+    assert [page.get("image") for page in pages[:9]] == [f"OEBPS/images/p{i}.png" for i in range(9)]
+    assert "image" not in pages[9] and pages[9]["href"] == "OEBPS/p9.xhtml"
 
 
 def test_novel_with_cover_is_not_manga(tmp_path):

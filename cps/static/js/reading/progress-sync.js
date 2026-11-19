@@ -200,16 +200,27 @@
             }
         }
 
-        async function request(method, body, keepalive) {
+        async function request(method, body, keepalive, url) {
             const init = {method, credentials: "same-origin", headers: {Accept: "application/json"}, keepalive};
             if (body) {
                 init.headers["Content-Type"] = "application/json";
                 init.headers["X-CSRFToken"] = options.csrfToken || "";
                 init.body = JSON.stringify(body);
             }
-            const response = await root.fetch(config.url, init);
+            const response = await root.fetch(url || config.url, init);
             if (!response.ok) throw new Error("HTTP " + response.status);
             return response.json();
+        }
+
+        function remoteText(state) {
+            return (messages.remote || "{percent} {device}")
+                .replace("{percent}", percentText(state.percentage))
+                .replace("{device}", state.device || "");
+        }
+
+        function isNewerRemote(state) {
+            return (!known || state.timestamp > known.timestamp) && state.device_id !== id &&
+                state.progress !== (known && known.progress);
         }
 
         function send(keepalive) {
@@ -249,15 +260,10 @@
                 try {
                     const state = await request("GET");
                     if (!state || typeof state.timestamp !== "number") return null;
-                    const newer = !known || state.timestamp > known.timestamp;
-                    if (newer && state.device_id !== id && state.progress !== (known && known.progress)) {
+                    if (isNewerRemote(state)) {
                         known = state;
                         if (options.onRemote) {
-                            const text = (messages.remote || "{percent} {device}")
-                                .replace("{percent}", percentText(state.percentage))
-                                .replace("{device}", state.device || "");
-                            show(text, [{label: messages.jump || "OK", primary: true, run: () => options.onRemote(state)},
-                                {label: messages.dismiss || "×"}]);
+                            session.offer(state, () => options.onRemote(state));
                         }
                         return state;
                     }
@@ -267,6 +273,40 @@
                 }
                 return null;
             },
+            /** Saves the current position now, then opens a newer position from another device if there is one. */
+            async syncNow() {
+                show(messages.syncing || "…", []);
+                try {
+                    if (pending || inflight) await send(false);
+                    if (pending) throw new Error("save failed");
+                    const state = await request("GET");
+                    if (state && typeof state.timestamp === "number") {
+                        const remote = isNewerRemote(state);
+                        known = state;
+                        if (remote && options.onRemote) await options.onRemote(state);
+                    }
+                    show((messages.synced || "{percent}").replace("{percent}", percentText(known ? known.percentage : 0)), []);
+                    return known;
+                } catch (error) {
+                    hidePrompt();
+                    errorShown = false;
+                    failed(error);
+                    return null;
+                }
+            },
+            /** Prompts to continue from `state`, calling `run` if the reader accepts. */
+            offer(state, run) {
+                show(remoteText(state), [{label: messages.jump || "OK", primary: true, run},
+                    {label: messages.dismiss || "×"}]);
+            },
+            /** Links an unmatched KOReader document hash to this book; resolves to the new server state. */
+            async link(candidate) {
+                const state = await request("POST", {document: candidate.document, format: config.format}, false,
+                    config.linkUrl);
+                if (state && typeof state.timestamp === "number") known = state;
+                return known;
+            },
+            candidates: Array.isArray(config.candidates) ? config.candidates : [],
             isOwn(state) { return Boolean(state && state.device_id === id); }
         };
 

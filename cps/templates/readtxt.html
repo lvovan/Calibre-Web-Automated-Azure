@@ -34,5 +34,9 @@
         <div id="area"><pre id="content" class="content"></pre></div>
         <div id="right" class="arrow">›</div>
       </div>
+      {% if progress_sync %}
+      <button type="button" id="sync-now" title="{{_('Sync progress now')}}" aria-label="{{_('Sync progress now')}}"
+              style="position:fixed;top:8px;right:8px;z-index:10;padding:2px 8px;font-size:16px;opacity:.6">&#x21bb;</button>
+      {% endif %}
     </body>
 </html>

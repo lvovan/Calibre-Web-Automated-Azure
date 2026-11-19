@@ -97,7 +97,8 @@ function sessionHarness(state = null) {
         }
     });
     const remote = [];
-    const session = sync.create({url: "/kosync/reader/1", device: "CWA Web Reader", state,
+    const session = sync.create({url: "/kosync/reader/1", linkUrl: "/kosync/reader/1/link", format: "epub",
+        device: "CWA Web Reader", state,
         messages: {remote: "Continue from {percent} on {device}?", jump: "Continue", dismiss: "Dismiss"}},
     {csrfToken: "token", onRemote: s => remote.push(s)});
     return {session, requests, timers, appended, remote, listeners, setResponse: r => { response = r; },
@@ -137,6 +138,35 @@ test("newer progress from another device prompts to jump; own progress does not"
 
 test("sync is unavailable without server configuration", () => {
     assert.equal(load().create(null, {}), null);
+});
+
+test("sync now saves the pending position before opening newer progress from another device", async () => {
+    const h = sessionHarness({progress: "3", percentage: 0.1, timestamp: 10, device_id: "device-1"});
+    h.session.save("5", 0.5);
+    h.setResponse(init => (init.method === "PUT" ? {...JSON.parse(init.body), timestamp: 20}
+        : {progress: "40", percentage: 0.4, timestamp: 30, device: "Kobo", device_id: "kobo"}));
+    const state = await h.session.syncNow();
+    assert.deepEqual(h.requests.map(r => r.init.method), ["PUT", "GET"]);
+    assert.equal(h.requests[0].body.progress, "5");
+    assert.equal(state.progress, "40");
+    assert.deepEqual(h.remote.map(s => s.progress), ["40"]);
+    assert.equal(h.appended.at(-1).children[0].textContent, "40%");
+
+    h.setResponse({progress: "40", percentage: 0.4, timestamp: 30, device: "Kobo", device_id: "kobo"});
+    await h.session.syncNow();
+    assert.equal(h.remote.length, 1);  // already known: no second jump
+});
+
+test("linking a KOReader document posts the hash and format and adopts the returned state", async () => {
+    const h = sessionHarness(null);
+    h.setResponse({progress: "/body/DocFragment[6]", percentage: 0.12, timestamp: 50, device_id: "kindle"});
+    const state = await h.session.link({document: "91ba0dfe", percentage: 0.12});
+    assert.equal(h.requests[0].url, "/kosync/reader/1/link");
+    assert.equal(h.requests[0].init.method, "POST");
+    assert.equal(h.requests[0].init.headers["X-CSRFToken"], "token");
+    assert.deepEqual(h.requests[0].body, {document: "91ba0dfe", format: "epub"});
+    assert.equal(state.timestamp, 50);
+    assert.equal(h.session.state.device_id, "kindle");
 });
 
 function pdfHarness(state) {

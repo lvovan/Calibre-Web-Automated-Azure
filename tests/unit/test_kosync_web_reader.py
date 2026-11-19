@@ -205,3 +205,73 @@ def test_reader_config_is_only_provided_when_sync_is_available(env):
         env.login(env.users[0])
         env.state.enabled = False
         assert env.kosync.reader_progress_config(BOOK_ID) is None
+
+def _koreader_record(env, document, progress="/body/DocFragment[6]/body/p[18]/text().477", when=2025, user=0):
+    env.session.add(env.models.KOSyncProgress(
+        user_id=env.users[user].id, document=document, progress=progress, percentage=11.88,
+        device="KindleOasis2", device_id="kindle-1", timestamp=datetime(when, 1, 1, tzinfo=timezone.utc)))
+    env.session.commit()
+
+
+@pytest.fixture
+def linking(env, monkeypatch):
+    """A book with an EPUB file and a checksum store that records links in the checksum table."""
+    env.kosync_book = types.SimpleNamespace(id=BOOK_ID, title="One Piece 1",
+                                            data=[types.SimpleNamespace(format="EPUB")])
+    import cps
+    cps.calibre_db.get_filtered_book = lambda book_id: env.kosync_book if book_id == BOOK_ID else None
+    checksums = types.ModuleType("cps.progress_syncing.checksums")
+
+    def store_checksum(book_id, book_format, checksum):
+        env.session.add(env.models.BookFormatChecksum(book=book_id, format=book_format, checksum=checksum))
+        env.session.commit()
+        return True
+
+    checksums.store_checksum = store_checksum
+    monkeypatch.setitem(sys.modules, "cps.progress_syncing.checksums", checksums)
+    return env
+
+
+def test_reader_config_offers_only_newer_unmatched_koreader_progress(linking):
+    env = linking
+    env.session.add(env.models.BookFormatChecksum(book=7, format="EPUB", checksum="known"))
+    env.session.commit()
+    _koreader_record(env, "known")
+    _koreader_record(env, "stale", when=2020)
+    _koreader_record(env, "pdfpage", progress="12")
+    _koreader_record(env, "otheruser", user=1)
+    _koreader_record(env, "kindlehash")
+    env.session.add(env.models.KOSyncProgress(user_id=env.users[0].id, document=str(BOOK_ID), progress="3",
+                                              percentage=5.0, device="CWA Web Reader", device_id="web",
+                                              timestamp=datetime(2022, 1, 1, tzinfo=timezone.utc)))
+    env.session.commit()
+
+    with env.app.test_request_context():
+        config = env.kosync.reader_progress_config(BOOK_ID, "epub")
+        assert [c["document"] for c in config["candidates"]] == ["kindlehash"]
+        assert config["candidates"][0]["percentage"] == pytest.approx(0.1188)
+        assert config["linkUrl"] == _url() + "/link"
+        assert config["format"] == "EPUB"
+        assert env.kosync.reader_progress_config(BOOK_ID, "pdf")["candidates"] == []
+
+
+def test_linking_attaches_the_koreader_hash_so_progress_is_shared(linking):
+    env = linking
+    _koreader_record(env, "kindlehash")
+    link = _url() + "/link"
+
+    assert env.client.post(link, json={"document": "unknown", "format": "EPUB"}).status_code == 404
+    assert env.client.post(link, json={"document": "kindlehash", "format": "PDF"}).status_code == 400
+    assert env.client.post(link, json={"format": "EPUB"}).status_code == 400
+    assert env.client.post(_url(HIDDEN_BOOK_ID) + "/link",
+                           json={"document": "kindlehash", "format": "EPUB"}).status_code == 404
+    env.login(env.users[1])
+    assert env.client.post(link, json={"document": "kindlehash", "format": "EPUB"}).status_code == 404
+    env.login(env.users[0])
+
+    linked = env.client.post(link, json={"document": "kindlehash", "format": "epub"})
+    assert linked.status_code == 200
+    assert linked.get_json()["device"] == "KindleOasis2"
+    assert env.client.get(_url()).get_json()["progress"] == "/body/DocFragment[6]/body/p[18]/text().477"
+    with env.app.test_request_context():
+        assert env.kosync.reader_progress_config(BOOK_ID, "epub")["candidates"] == []

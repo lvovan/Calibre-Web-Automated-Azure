@@ -27,7 +27,9 @@
     function update(location) {
         if (!location || !location.start || !location.end) return;
         let fraction;
-        if (indexed && !calibre.manga) {
+        if (typeof location.end.percentage === "number" && calibre.imagePages) {
+            fraction = location.end.percentage;
+        } else if (indexed && !calibre.manga) {
             fraction = book.locations.percentageFromCfi(location.end.cfi);
         } else {
             const sections = book.spine.spineItems.filter(section => section.linear);
@@ -93,8 +95,12 @@
     };
 
     function targetForPercentage(percent) {
-        const sections = book.spine.spineItems.filter(section => section.linear);
         const fraction = Math.max(0, Math.min(1, percent / 100));
+        if (calibre.imagePages) {
+            const pages = calibre.epubData.pages;
+            return pages[Math.min(pages.length - 1, Math.max(0, Math.ceil(fraction * pages.length) - 1))].index;
+        }
+        const sections = book.spine.spineItems.filter(section => section.linear);
         return indexed ? book.locations.cfiFromPercentage(fraction) :
             sections[Math.min(sections.length - 1, Math.max(0, Math.ceil(fraction * sections.length) - 1))].index;
     }
@@ -150,6 +156,46 @@
         return indexing;
     }
 
+    /** First unmatched KOReader position (newest first) that points to real content in this book. */
+    async function matchingCandidate(candidates) {
+        const sync = window.CwaProgressSync;
+        const linear = book.spine.spineItems.filter(section => section.linear);
+        for (const candidate of candidates) {
+            const parsed = sync.parseXPointer(candidate.progress);
+            const section = parsed && book.spine.get(parsed.fragment);
+            if (!section || !parsed.steps.length) continue;
+            // A position deep in another book can resolve here by coincidence; its percentage would not fit.
+            const position = Math.max(0, linear.indexOf(section)) / Math.max(1, linear.length);
+            if (Math.abs(position - candidate.percentage) > 0.2) continue;
+            try {
+                const doc = await book.load(section.url);
+                const body = doc && (doc.body || doc.getElementsByTagName("body")[0]);
+                const found = body && sync.resolveXPointer(body, parsed);
+                if (found && found.exact && found.node !== body &&
+                    (!parsed.text || found.offset <= found.node.nodeValue.length)) return candidate;
+            } catch (error) {
+                console.warn("Could not check a KOReader position", error);
+            }
+        }
+        return null;
+    }
+
+    async function offerUnmatchedProgress() {
+        const candidates = calibre.sync && calibre.sync.candidates;
+        if (!candidates || !candidates.length) return;
+        const candidate = await matchingCandidate(candidates);
+        if (!candidate) return;
+        calibre.sync.offer(candidate, async function () {
+            try {
+                await calibre.sync.link(candidate);
+            } catch (error) {
+                console.warn("Could not link the KOReader document to this book", error);
+            }
+            await calibre.onRemoteProgress(candidate);
+        });
+    }
+
+    reader.displayed.then(offerUnmatchedProgress).catch(error => console.warn("Could not offer KOReader progress", error));
     reader.displayed.then(async function () {
         if (!calibre.manga) await locations();
         const legacy = calibre.legacyPercent;

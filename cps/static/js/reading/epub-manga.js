@@ -31,6 +31,17 @@
 
         load(index) {
             if (!this.images.has(index)) {
+                const page = this.pages[index];
+                if (!page.image) {
+                    // Occasional non-image pages (credits, notices) are framed without scripts; frames load once shown.
+                    const frame = document.createElement("iframe");
+                    frame.setAttribute("sandbox", "allow-same-origin");
+                    frame.title = "Page " + (index + 1);
+                    frame.src = resourceUrl(page.href);
+                    frame.cancelLoad = () => {};
+                    this.images.set(index, {image: frame, ready: Promise.resolve(frame)});
+                    return this.images.get(index).ready;
+                }
                 const image = new Image();
                 image.alt = "";
                 image.draggable = false;
@@ -39,7 +50,7 @@
                     image.onerror = () => reject(new Error("Unable to load EPUB page " + (index + 1)));
                     image.cancelLoad = () => reject(new DOMException("EPUB page request cancelled", "AbortError"));
                 });
-                image.src = resourceUrl(this.pages[index].image);
+                image.src = resourceUrl(page.image);
                 this.images.set(index, {image, ready});
             }
             return this.images.get(index).ready;

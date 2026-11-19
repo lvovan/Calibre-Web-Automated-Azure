@@ -101,3 +101,35 @@ def test_plural_matching_in_both_directions(plural, singular):
 
     assert search_text_score(plural, normalize_search_text(singular), False) == 1
     assert search_text_score(singular, normalize_search_text(plural), False) == 1
+
+
+@pytest.mark.parametrize(("query", "expected"), [
+    ("one pice", [7]),            # missing letter
+    ("onepiece", [7]),            # missing space
+    ("eiichiro odda", [7]),       # misspelled author
+    ("eichiro", [7]),
+    ("strwa hat", [7]),           # transposed series word
+    ("mont", [2]),                # truncated word
+    ("ndarutoo", []),             # too many edits
+    ('"one pice"', []),           # quoted phrases stay exact
+])
+def test_searches_tolerate_typos_when_nothing_matches_as_typed(library, query, expected):
+    _add_one_piece(library)
+    assert ids(library, query) == expected
+
+
+def test_typo_tolerance_does_not_add_near_misses_to_exact_results(library):
+    _add_one_piece(library)
+    library.session.execute(db.Books.__table__.insert(), [{"id": 8, "title": "Peace", "sort": "Peace"}])
+    library.session.commit()
+    assert ids(library, "piece") == [7]
+    assert sorted(ids(library, "pece")) == [7, 8]
+
+
+def _add_one_piece(library):
+    library.session.execute(db.Books.__table__.insert(), [{"id": 7, "title": "One Piece, Vol. 1", "sort": "One"}])
+    library.session.execute(db.Authors.__table__.insert(), [{"id": 2, "name": "Eiichiro Oda"}])
+    library.session.execute(db.books_authors_link.insert(), [{"book": 7, "author": 2}])
+    library.session.execute(db.Series.__table__.insert(), [{"id": 1, "name": "Straw Hat", "sort": "Straw Hat"}])
+    library.session.execute(db.books_series_link.insert(), [{"book": 7, "series": 1}])
+    library.session.commit()

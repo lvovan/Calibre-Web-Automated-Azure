@@ -195,6 +195,13 @@
       <li role="none">
         <hr class="menuSeparator" />
       </li>
+      {% if progress_sync %}
+      <li role="none">
+        <button id="menu-sync-now" class="menuItem" role="menuitem" tabindex="-1">
+          <span class="menuItemText">{{_('Sync progress now')}}</span>
+        </button>
+      </li>
+      {% endif %}
       <li role="none">
         <button id="menu-help" class="menuItem" role="menuitem" tabindex="-1">
           <span class="menuItemText">{{_('Help (keyboard shortcuts)')}}</span>

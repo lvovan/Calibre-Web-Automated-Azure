@@ -884,7 +884,7 @@ def _serialize_web_progress(record: KOSyncProgress | None) -> dict[str, Any] | N
     }
 
 
-def reader_progress_config(book_id: int) -> dict[str, Any] | None:
+def reader_progress_config(book_id: int, book_format: str | None = None) -> dict[str, Any] | None:
     """Progress sync settings embedded in the web reader pages, or None when sync is unavailable."""
     from flask import url_for
 
@@ -892,8 +892,12 @@ def reader_progress_config(book_id: int) -> dict[str, Any] | None:
 
     if not current_user.is_authenticated or current_user.is_anonymous or not is_koreader_sync_enabled():
         return None
+    candidates = []
     try:
         state = _serialize_web_progress(_web_progress_record(int(current_user.id), book_id))
+        if (book_format or "").lower() in ("epub", "kepub"):
+            candidates = [dict(_serialize_web_progress(record), document=record.document)
+                          for record in _unmatched_progress(int(current_user.id), state and state["timestamp"])]
     except SQLAlchemyError as e:
         log.warning(f"Could not load reading progress for book {book_id}: {e}")
         state = None
@@ -901,13 +905,76 @@ def reader_progress_config(book_id: int) -> dict[str, Any] | None:
         "url": url_for("kosync.reader_progress", book_id=book_id),
         "state": state,
         "device": WEB_DEVICE_NAME,
+        "candidates": candidates,
+        "linkUrl": url_for("kosync.link_reader_progress", book_id=book_id) if candidates else None,
+        "format": (book_format or "").upper(),
         "messages": {
             "remote": _("Continue from %(percent)s on %(device)s?", percent="{percent}", device="{device}"),
             "jump": _("Continue"),
             "dismiss": _("Dismiss"),
             "error": _("Reading progress could not be synchronized."),
+            "synced": _("Reading progress synchronized (%(percent)s).", percent="{percent}"),
+            "syncing": _("Synchronizing reading progress…"),
         },
     }
+
+
+# KOReader identifies books by a hash of the file it holds. Copies downloaded before checksums were
+# recorded (or edited since) never match a library file, so their progress is offered to the reader,
+# which verifies the position against the open book before linking the hash to it.
+MAX_LINK_CANDIDATES = 10
+
+
+def _unmatched_progress(user_id: int, newer_than: float | None = None) -> list[KOSyncProgress]:
+    """The user's newest EPUB progress records whose document hash matches no library file."""
+    from ... import calibre_db
+    from ...db import BookFormatChecksum
+
+    records = [record for record in ub.session.query(KOSyncProgress).filter(
+        KOSyncProgress.user_id == user_id,
+        KOSyncProgress.progress.like("/body/DocFragment%")
+    ).order_by(desc(KOSyncProgress.timestamp)).limit(MAX_LINK_CANDIDATES * 5).all()
+        if not record.document.isdigit()]
+    if newer_than is not None:
+        records = [record for record in records if _serialize_web_progress(record)["timestamp"] > newer_than]
+    if not records:
+        return []
+    known = {row[0] for row in calibre_db.session.query(BookFormatChecksum.checksum).filter(
+        BookFormatChecksum.checksum.in_([record.document for record in records])).all()}
+    return [record for record in records if record.document not in known][:MAX_LINK_CANDIDATES]
+
+
+@kosync.route("/kosync/reader/<int:book_id>/link", methods=["POST"])
+@usermanagement.user_login_required
+def link_reader_progress(book_id: int):
+    """Attach an unmatched KOReader document hash to this book after the reader verified the position."""
+    from ... import calibre_db
+    from ...cw_login import current_user
+    from ..checksums import store_checksum
+
+    if not is_koreader_sync_enabled():
+        return jsonify({"message": "Reading progress sync is disabled"}), 404
+    book = calibre_db.get_filtered_book(book_id)
+    if not book:
+        return jsonify({"message": "Book not found"}), 404
+    data = request.get_json(silent=True)
+    document = data.get("document") if isinstance(data, dict) else None
+    book_format = str(data.get("format") or "").upper() if isinstance(data, dict) else ""
+    if not is_valid_key_field(document):
+        return jsonify({"message": "Invalid document field"}), 400
+    if book_format not in ("EPUB", "KEPUB") or not any(item.format.upper() == book_format for item in book.data):
+        return jsonify({"message": "Invalid format field"}), 400
+    try:
+        if document not in {record.document for record in _unmatched_progress(int(current_user.id))}:
+            return jsonify({"message": "Progress record not found"}), 404
+        if not store_checksum(book_id, book_format, document):
+            return jsonify({"message": "Could not link reading progress"}), 500
+        log.info(f"Linked KOReader document {document} to book {book_id} for user {current_user.id}")
+        return jsonify(_serialize_web_progress(_web_progress_record(int(current_user.id), book_id)) or {})
+    except SQLAlchemyError as e:
+        log.error(f"link_reader_progress: Database error for book {book_id}: {e}")
+        ub.session.rollback()
+        return jsonify({"message": "Database error"}), 500
 
 
 @kosync.route("/kosync/reader/<int:book_id>", methods=["GET", "PUT"])

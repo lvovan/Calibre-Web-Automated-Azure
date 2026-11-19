@@ -13,6 +13,7 @@
 import { config } from './config.js';
 import { Params } from './common/helpers.js';
 import { KthoomApp } from './kthoom.js';
+import { MenuEventType } from './menu.js';
 import { RemoteImagePage } from './page.js';
 
 const cfg = window.cwaComic;
@@ -162,6 +163,11 @@ async function loadPaged() {
 
 async function start() {
   await app.initializedPromise_;
+  if (sync && app.mainMenu_) {
+    app.mainMenu_.addEventListener(MenuEventType.ITEM_SELECTED, (evt) => {
+      if (evt.item.id === 'menu-sync-now') sync.syncNow();
+    });
+  }
   let book = null;
   try {
     book = await loadPaged();

@@ -4,6 +4,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import pairwise
 
 from .constants import EXTENSIONS_UPLOAD, EXTENSIONS_CONVERT_FROM
 
@@ -125,9 +126,55 @@ def _matchers(term, phrase):
     return pattern({term}), pattern(variants) if variants else None
 
 
-def search_text_score(value, term, phrase):
+def search_text_score(value, term, phrase, fuzzy=0):
     value = normalize_search_text(value)
     exact, inflected = _matchers(term, phrase)
     if exact.search(value):
         return 2
-    return int(inflected is not None and inflected.search(value) is not None)
+    if inflected is not None and inflected.search(value) is not None:
+        return 1
+    if fuzzy and not phrase and fuzzy_term(term) and _fuzzy_match(value, term):
+        return FUZZY_SCORE
+    return 0
+
+
+# Typo tolerance: a word within a small edit distance of the term (one edit for 4-7 letters,
+# two from 8). Only used when a search finds nothing as typed, and never for quoted phrases.
+FUZZY_SCORE = 0.5
+_WORD = re.compile(r'\w+')
+
+
+def fuzzy_term(term):
+    return len(term) >= 4 and not term.isdigit()
+
+
+def _max_edits(term):
+    return 1 if len(term) < 8 else 2
+
+
+def _edit_distance(a, b, limit):
+    """Optimal string alignment distance (a transposition counts as one edit), capped at limit + 1."""
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    previous2 = None
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb))
+            if previous2 is not None and i > 1 and j > 1 and ca == b[j - 2] and a[i - 2] == cb:
+                current[j] = min(current[j], previous2[j - 2] + 1)
+        if min(current) > limit:
+            return limit + 1
+        previous2, previous = previous, current
+    return previous[-1]
+
+
+@lru_cache(maxsize=65536)
+def _fuzzy_match(value, term):
+    limit = _max_edits(term)
+    words = _WORD.findall(value)
+    # Adjacent words joined catch a missing space ("onepiece"); an exact word start catches a
+    # truncated word ("harry pott").
+    candidates = words + [a + b for a, b in pairwise(words)]
+    return any(word.startswith(term) or _edit_distance(term, word, limit) <= limit for word in candidates)

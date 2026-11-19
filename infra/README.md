@@ -98,7 +98,7 @@ The `azure-deploy.yml` workflow sets these Dockerfile build arguments. All defau
 |---|---|---|
 | `INSTALL_KEPUBIFY` | `false` | No kepubify. KEPUB conversion is unavailable, and Kobo sync sends plain EPUB instead of KEPUB. |
 | `PIP_EXCLUDE` | `google-api-python-client PyDrive2 oauth2client google-auth-oauthlib goodreads python-Levenshtein python-ldap Flask-SimpleLDAP scholarly` | Drops the Google Drive library, Gmail sending, Goodreads, LDAP login and the Google Scholar metadata source. |
-| `UBUNTU_MIRROR` | `http://azure.archive.ubuntu.com/ubuntu/` | Installs Ubuntu packages from Azure's mirror (GitHub runners are on Azure) instead of `archive.ubuntu.com`, which has outages. |
+| `UBUNTU_MIRROR` | `http://azure.archive.ubuntu.com/ubuntu/ http://mirrors.edge.kernel.org/ubuntu/ http://archive.ubuntu.com/ubuntu/` | Space-separated Ubuntu mirrors. apt tries them in order for each file, so one mirror outage doesn't fail the build. |
 
 The packages in `PIP_EXCLUDE` are moved to `optional-requirements.txt` inside the image. The startup dependency check treats them as optional, so it doesn't stop the app. To get a feature back, remove its package from `PIP_EXCLUDE` (or set `INSTALL_KEPUBIFY=true`) and push.
 

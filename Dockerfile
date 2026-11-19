@@ -27,7 +27,7 @@ ARG INSTALL_KEPUBIFY=true
 # Space-separated requirements.txt package names to skip, for slimmer images
 # that don't need some optional integrations (all are import-guarded in cps/).
 ARG PIP_EXCLUDE=""
-# Optional Ubuntu archive mirror (e.g. http://azure.archive.ubuntu.com/ubuntu/ on Azure-hosted CI runners).
+# Optional space-separated Ubuntu archive mirrors, tried in order by apt (mirror+file method).
 ARG UBUNTU_MIRROR=""
 
 FROM ghcr.io/linuxserver/baseimage-ubuntu:noble AS dependencies
@@ -46,7 +46,8 @@ RUN \
   # The deadsnakes PPA (Launchpad) intermittently returns 503: retry downloads
   echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries && \
   if [ -n "${UBUNTU_MIRROR}" ]; then \
-    sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?#${UBUNTU_MIRROR}#g" \
+    printf '%s\n' ${UBUNTU_MIRROR} > /etc/apt/ubuntu-mirrors.txt && \
+    sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?#mirror+file:/etc/apt/ubuntu-mirrors.txt#g" \
       $(ls /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null); \
   fi && \
   # STEP 1.1 - Add deadsnakes PPA for Python 3.13 and install required apt packages
@@ -222,7 +223,8 @@ COPY --from=dependencies /usr/bin/lsof /usr/bin/lsof
 RUN \
   echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries && \
   if [ -n "${UBUNTU_MIRROR}" ]; then \
-    sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?#${UBUNTU_MIRROR}#g" \
+    printf '%s\n' ${UBUNTU_MIRROR} > /etc/apt/ubuntu-mirrors.txt && \
+    sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?#mirror+file:/etc/apt/ubuntu-mirrors.txt#g" \
       $(ls /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null); \
   fi && \
   echo "**** add deadsnakes PPA for Python 3.13 runtime ****" && \

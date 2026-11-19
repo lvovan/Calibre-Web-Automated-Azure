@@ -286,6 +286,7 @@
 {% block js %}
 {{ super() }}
 {% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+<script src="{{ url_for('static', filename='js/libs/Sortable.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/bulk-edit.js') }}"></script>
 {% endif %}
 {% if page == 'magicshelf' %}

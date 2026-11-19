@@ -11,9 +11,10 @@
         <section class="bw-editor" id="bw-editor" aria-label="{{ _('Shared metadata') }}"></section>
         <section class="bw-results" aria-label="{{ _('Individual titles and reading order') }}">
           <div class="bw-section-heading"><h3>{{ _('Individual titles & reading order') }}</h3><span id="bw-number-state"></span></div>
-          <p class="bw-hint">{{ _('Rename each book here. Move books to define their order; titles stay attached to the book. Auto-numbering affects selected books only.') }}</p>
+          <p class="bw-hint">{{ _('Drag the handles or use Up/Down to reorder books; titles stay attached. With Auto-number off, the selected books exchange their existing series numbers. Other books are not changed.') }}</p>
+          <p class="bw-hint" id="bw-order-notice" role="status" aria-live="polite"></p>
           <div class="bw-table-scroll">
-            <table class="bw-sequence"><thead><tr><th>{{ _('Book title') }}</th><th>{{ _('Was') }}</th><th>{{ _('Will be') }}</th><th>{{ _('Order') }}</th></tr></thead><tbody id="bw-sequence"></tbody></table>
+            <table class="bw-sequence"><thead><tr><th aria-label="{{ _('Drag to reorder') }}"></th><th>{{ _('Book title') }}</th><th>{{ _('Was') }}</th><th>{{ _('Will be') }}</th><th>{{ _('Order') }}</th></tr></thead><tbody id="bw-sequence"></tbody></table>
           </div>
           <section class="bw-changes" aria-live="polite"><h3>{{ _('Pending changes') }}</h3><div id="bw-changes"></div></section>
           <h3>{{ _('Result details') }}</h3><div id="bw-preview"></div>
@@ -49,6 +50,9 @@
     'onlyThis': _('Only this book will be renamed.'), 'titleHelp': _('Edit this book only. Individual edits override the optional shared title.'),
     'titleRequired': _('Enter a title for book %(id)s, or reset it.', id='%(id)s'), 'was': _('Was: %(title)s', title='%(title)s'),
     'up': _('Up'), 'down': _('Down'), 'autoNumber': _('Auto-number within the series'),
+    'dragBook': _('Drag to reorder: %(title)s', title='%(title)s'), 'dragHelp': _('Drag to reorder, or use the Up/Down buttons.'),
+    'reassignNumbers': _('Reassign the selected books\' existing series numbers to match this order.'),
+    'duplicateNumbers': _('Some selected books share a series number. Enable Auto-number to give each book a distinct position.'),
     'start': _('Start at'), 'increment': _('Increment'), 'order': _('Order'),
     'selectionOrder': _('Selection order'), 'titleOrder': _('Title A-Z'), 'seriesOrder': _('Current series number'), 'customOrder': _('Custom order'),
     'numberOn': _('Auto-number on'), 'numberOff': _('Auto-number off'),

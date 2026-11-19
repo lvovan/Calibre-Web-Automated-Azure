@@ -6,7 +6,8 @@
     const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
     function model(data) {
         return {books: data.books.slice(), fields: data.fields.slice(), changes: {}, titles: {},
-            numbering: false, start: "1", increment: "1", order: "selection",
+            numbering: false, start: "1", increment: "1", order: "selection", reordered: false,
+            seriesSlots: data.books.map(book => book.values.series_index).sort((a, b) => Number(a) - Number(b)),
             originalOrder: data.books.map(book => book.id)};
     }
     function common(state, key) {
@@ -25,27 +26,34 @@
         if (state.order === "title") state.order = "custom";
     }
     function numberAt(state, book, index) {
-        if (!state.numbering) return effective(state, book, "series_index");
+        if (!state.numbering) return state.reordered && !own(state.changes, "series_index") ? state.seriesSlots[index] : effective(state, book, "series_index");
         return String(Math.round((Number(state.start) + index * Number(state.increment)) * 100) / 100);
     }
     function sortBooks(state, order) {
         state.order = order;
+        state.reordered = order !== "selection";
         if (order === "selection") state.books.sort((a, b) => state.originalOrder.indexOf(a.id) - state.originalOrder.indexOf(b.id));
         if (order === "title") state.books.sort((a, b) => effective(state, a, "title").localeCompare(effective(state, b, "title")));
         if (order === "series") state.books.sort((a, b) => Number(a.values.series_index) - Number(b.values.series_index));
     }
     function moveBook(state, id, direction) {
-        const index = state.books.findIndex(book => book.id === id), target = index + direction;
-        if (index < 0 || target < 0 || target >= state.books.length) return;
-        [state.books[index], state.books[target]] = [state.books[target], state.books[index]];
+        const index = state.books.findIndex(book => book.id === id);
+        reorderBook(state, id, index + direction);
+    }
+    function reorderBook(state, id, target) {
+        const index = state.books.findIndex(book => book.id === id);
+        if (index < 0 || !Number.isInteger(target) || target < 0 || target >= state.books.length || target === index) return;
+        state.books.splice(target, 0, state.books.splice(index, 1)[0]);
         state.order = "custom";
+        state.reordered = true;
     }
     function payload(state) {
         return {book_ids: state.books.map(book => book.id), changes: state.changes, titles: state.titles,
             versions: Object.fromEntries(state.books.map(book => [String(book.id), book.version])),
-            numbering: state.numbering ? {start: state.start, increment: state.increment} : null};
+            numbering: state.numbering ? {start: state.start, increment: state.increment} : null,
+            reorder: state.reordered && !state.numbering && !own(state.changes, "series_index")};
     }
-    const api = {model, common, effective, setTitle, numberAt, sortBooks, moveBook, payload};
+    const api = {model, common, effective, setTitle, numberAt, sortBooks, moveBook, reorderBook, payload};
     if (typeof module !== "undefined" && module.exports) module.exports = api;
     if (typeof document === "undefined") return;
 
@@ -72,6 +80,15 @@
             $id("bw-error").textContent = message;
             if (message) $id("bw-error").focus();
         };
+        const sortable = window.Sortable.create($id("bw-sequence"), {
+            draggable: "tr[data-book]", handle: ".bw-drag-handle", animation: 150,
+            ghostClass: "bw-sort-ghost", chosenClass: "bw-sort-chosen", dragClass: "bw-sort-drag",
+            delayOnTouchOnly: true, delay: 150, fallbackTolerance: 4,
+            onEnd(event) {
+                if (!busy && !locked) reorderBook(state, Number(event.item.dataset.book), event.newIndex);
+                render();
+            }
+        });
 
         function cards() {
             return Array.from(grid.querySelectorAll(".book")).map(card => {
@@ -158,13 +175,15 @@
             $id("bw-tabs").innerHTML = config.groups.map(item => `<button type="button" class="bw-tab ${item.id === group ? "active" : ""}" data-group="${item.id}" aria-current="${item.id === group ? "page" : "false"}">${escape(item.label)}</button>`).join("");
             $id("bw-editor").innerHTML = editorHTML();
             $id("bw-number-state").textContent = state.numbering ? text.numberOn : text.numberOff;
+            $id("bw-order-notice").textContent = state.reordered && !state.numbering && new Set(state.seriesSlots.map(Number)).size < state.books.length ? text.duplicateNumbers : "";
             $id("bw-sequence").innerHTML = state.books.map((book, index) => {
                 const changed = own(state.titles, book.id), title = titleOf(book);
-                return `<tr><td><div class="bw-title ${changed ? "changed" : ""}"><label for="bw-title-${book.id}">${escape(text.individualTitle)}</label><input id="bw-title-${book.id}" type="text" data-title="${book.id}" value="${escape(title)}" aria-label="${escape(format("titleFor", {id: book.id}))}" ${!title.trim() ? 'aria-invalid="true"' : ""}><small>${escape(changed ? text.onlyThis : text.titleHelp)}</small>${changed ? `<small>${escape(format("was", {title: book.values.title}))}</small><button type="button" class="bw-link" data-reset-title="${book.id}">${escape(text.resetTitle)}</button>` : ""}</div></td><td>${escape(shown(book.values.series_index))}</td><td>${escape(shown(numberAt(state, book, index)))}</td><td><button type="button" class="bw-move" data-move="${book.id}" data-direction="-1" aria-label="${escape(text.up + ': ' + title)}" ${index === 0 ? "disabled" : ""}>${escape(text.up)}</button><button type="button" class="bw-move" data-move="${book.id}" data-direction="1" aria-label="${escape(text.down + ': ' + title)}" ${index === state.books.length - 1 ? "disabled" : ""}>${escape(text.down)}</button></td></tr>`;
+                return `<tr data-book="${book.id}"><td class="bw-grip-cell"><span class="bw-drag-handle" role="img" aria-label="${escape(format("dragBook", {title}))}" title="${escape(text.dragHelp)}"><svg width="12" height="24" viewBox="0 0 12 24" aria-hidden="true"><circle cx="3" cy="6" r="1.5"/><circle cx="9" cy="6" r="1.5"/><circle cx="3" cy="12" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="3" cy="18" r="1.5"/><circle cx="9" cy="18" r="1.5"/></svg></span></td><td><div class="bw-title ${changed ? "changed" : ""}"><label for="bw-title-${book.id}">${escape(text.individualTitle)}</label><input id="bw-title-${book.id}" type="text" data-title="${book.id}" value="${escape(title)}" aria-label="${escape(format("titleFor", {id: book.id}))}" ${!title.trim() ? 'aria-invalid="true"' : ""}><small>${escape(changed ? text.onlyThis : text.titleHelp)}</small>${changed ? `<small>${escape(format("was", {title: book.values.title}))}</small><button type="button" class="bw-link" data-reset-title="${book.id}">${escape(text.resetTitle)}</button>` : ""}</div></td><td>${escape(shown(book.values.series_index))}</td><td>${escape(shown(numberAt(state, book, index)))}</td><td><button type="button" id="bw-up-${book.id}" class="bw-move" data-move="${book.id}" data-direction="-1" aria-label="${escape(text.up + ': ' + title)}" ${index === 0 ? "disabled" : ""}>${escape(text.up)}</button><button type="button" id="bw-down-${book.id}" class="bw-move" data-move="${book.id}" data-direction="1" aria-label="${escape(text.down + ': ' + title)}" ${index === state.books.length - 1 ? "disabled" : ""}>${escape(text.down)}</button></td></tr>`;
             }).join("");
             const changes = state.fields.filter(field => own(state.changes, field.key)).map(field => `${field.label}: ${shown(state.changes[field.key])}`);
             state.books.filter(book => own(state.titles, book.id)).forEach(book => changes.push(`${format("titleFor", {id: book.id})}: ${book.values.title} -> ${state.titles[book.id]}`));
             if (state.numbering) changes.push(`${text.autoNumber}: ${state.start} / +${state.increment}`);
+            else if (state.books.some((book, index) => Number(numberAt(state, book, index)) !== Number(effective(state, book, "series_index")))) changes.push(text.reassignNumbers);
             if (coverFile) changes.push(text.coverFile + ": " + coverFile.name);
             $id("bw-changes").innerHTML = changes.length ? changes.map(change => `<p>${escape(change)}</p>`).join("") : `<p>${escape(text.noChanges)}</p>`;
             $id("bw-preview").innerHTML = state.books.map((book, index) => `<details class="bw-preview" data-book="${book.id}" ${opened.has(String(book.id)) ? "open" : ""}><summary><img class="bw-cover" src="${escape(book.cover)}" alt="${escape(text.cover)}">${escape(titleOf(book))}<br><small>${escape(effective(state, book, "authors"))}</small></summary><dl class="bw-values">${state.fields.map(field => `<div><dt>${escape(field.label)}</dt><dd>${escape(shown(field.key === "series_index" ? numberAt(state, book, index) : effective(state, book, field.key)))}</dd></div>`).join("")}${systemHTML(book)}</dl></details>`).join("");
@@ -172,6 +191,7 @@
             $id("bw-save").textContent = busy ? text.saving : format("apply", {count: state.books.length});
             $id("bw-save").disabled = busy || locked || !changes.length;
             modal.setAttribute("aria-busy", String(busy));
+            sortable.option("disabled", busy || locked);
             modal.querySelectorAll(".bw-layout input,.bw-layout textarea,.bw-layout select,.bw-layout button,.bw-tabs button").forEach(element => { if (busy || locked) element.disabled = true; });
             $id("bw-editor").scrollTop = scrollLeft;
             modal.querySelector(".bw-results").scrollTop = scrollRight;

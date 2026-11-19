@@ -176,6 +176,32 @@ def test_rename_precedes_relationship_edits_and_reuses_canonical_names(workbench
     assert other.tags[0].name == 'Original tag'
 
 
+def test_reorder_exchanges_existing_slots_without_changing_other_books(workbench):
+    workbench.library.session.get(workbench.db.Books, 2).series_index = '8.5'
+    workbench.library.session.commit()
+    patch = draft(workbench, (2, 1))
+    patch.update(reorder=True, titles={'1': 'Renamed first book'})
+    response = save(workbench, patch)
+    assert response.status_code == 200, response.json
+    books = [workbench.library.session.get(workbench.db.Books, value) for value in (1, 2, 3)]
+    assert [float(book.series_index) for book in books] == [8.5, 5, 7]
+    assert books[0].title == 'Renamed first book'
+    assert books[1].title == 'Title 2'
+    assert books[2].last_modified == datetime(2026, 1, 2)
+
+
+def test_reorder_leaves_already_correct_numbers_and_sync_records_untouched(workbench):
+    patch = draft(workbench, (1, 2))
+    patch['reorder'] = True
+    workbench.ub.session.add(workbench.ub.KoboSyncedBooks(user_id=1, book_id=2))
+    workbench.ub.session.commit()
+    response = save(workbench, patch)
+    assert response.status_code == 200
+    assert [result['status'] for result in response.json['results']] == ['unchanged', 'unchanged']
+    assert workbench.ub.session.query(workbench.ub.KoboSyncedBooks).one().book_id == 2
+    workbench.bulk._export_changes.assert_not_called()
+
+
 def test_identifier_patch_preserves_unique_types_and_clear_is_explicit(workbench):
     patch = draft(workbench)
     patch['changes'] = {'identifier:asin': 'shared-asin', 'publisher': '', 'rating': '3.5', 'tags': ''}
@@ -208,6 +234,9 @@ def test_title_only_edit_leaves_other_selected_books_and_sync_records_untouched(
     {'changes': {'custom_column_999': 'invalid'}},
     {'numbering': {'start': '1', 'increment': '0'}},
     {'changes': {'series': ''}, 'numbering': {'start': '1', 'increment': '1'}},
+    {'reorder': 'true'}, {'reorder': True, 'changes': {'series_index': '1'}},
+    {'reorder': True, 'numbering': {'start': '1', 'increment': '1'}},
+    {'reorder': True, 'changes': {'series': ''}},
 ])
 def test_invalid_batch_rejected_before_any_writes(workbench, change):
     patch = draft(workbench)

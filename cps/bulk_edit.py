@@ -186,7 +186,7 @@ def _number(value, label, minimum=None, maximum=None, step=None):
 
 
 def validate_payload(payload, books, fields):
-    if not isinstance(payload, dict) or set(payload) - {'book_ids', 'changes', 'titles', 'numbering', 'versions'}:
+    if not isinstance(payload, dict) or set(payload) - {'book_ids', 'changes', 'titles', 'numbering', 'versions', 'reorder'}:
         raise InvalidEdit(_('Invalid bulk edit request.'))
     changes, titles, versions = (payload.get(key, {}) for key in ('changes', 'titles', 'versions'))
     if not all(isinstance(value, dict) for value in (changes, titles, versions)):
@@ -244,6 +244,14 @@ def validate_payload(payload, books, fields):
         if not isinstance(title, str) or not title.strip() or len(title) > 10000:
             raise InvalidEdit(_('A title is required for book %(id)s.', id=book.id))
     numbering = payload.get('numbering')
+    reorder = payload.get('reorder', False)
+    if not isinstance(reorder, bool) or (reorder and (numbering is not None or 'series_index' in changes)):
+        raise InvalidEdit(_('Invalid series ordering.'))
+    if reorder:
+        for book in books:
+            _number(str(book.series_index), _('Series ID'), 0)
+        if any(not changes.get('series', b.series[0].name if b.series else '').strip() for b in books):
+            raise InvalidEdit(_('Set a series for all selected books before reordering.'))
     if numbering is not None:
         if not isinstance(numbering, dict) or set(numbering) != {'start', 'increment'}:
             raise InvalidEdit(_('Invalid series numbering.'))
@@ -409,7 +417,9 @@ def save_workbench():
         cover_file = request.files.get('cover_file')
         if cover_file and cover_file.mimetype not in {'image/jpeg', 'image/png', 'image/webp'}:
             raise InvalidEdit(_('Choose a JPEG, PNG, or WebP cover image.'))
-        if not changes and not titles and not numbering and not cover_file:
+        reorder = payload.get('reorder', False)
+        series_slots = sorted(Decimal(str(book.series_index)) for book in books) if reorder else []
+        if not changes and not titles and not numbering and not reorder and not cover_file:
             raise InvalidEdit(_('No changes selected.'))
     except (InvalidEdit, json.JSONDecodeError) as error:
         log.warning('Bulk edit rejected: %s', error)
@@ -425,6 +435,8 @@ def save_workbench():
             patch['title'] = titles[str(book.id)]
         if numbering:
             patch['series_index'] = format(Decimal(numbering['start']) + index * Decimal(numbering['increment']), 'f')
+        elif reorder and series_slots[index] != Decimal(str(book.series_index)):
+            patch['series_index'] = format(series_slots[index], 'f')
         if not patch and not cover_file:
             results.append(dict(id=book.id, status='unchanged'))
             continue

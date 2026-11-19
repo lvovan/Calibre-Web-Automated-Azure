@@ -4,7 +4,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {model, common, effective, setTitle, numberAt, sortBooks, moveBook, payload} = require("../../cps/static/js/bulk-edit.js");
+const {model, common, effective, setTitle, numberAt, sortBooks, moveBook, reorderBook, payload} = require("../../cps/static/js/bulk-edit.js");
 function selection() {
     return model({fields: [], books: [
         {id: 20, version: "v20", values: {title: "Zebra", authors: "Common author", series_index: "4", tags: "A"}},
@@ -63,6 +63,76 @@ test("title sorting uses individual edits without losing identity or allowing ou
     assert.deepEqual(payload(state).titles, {});
 });
 
+test("reordering preserves existing number slots and explicit numbering takes precedence", () => {
+    const state = selection();
+    sortBooks(state, "series");
+    moveBook(state, 20, -1);
+    assert.deepEqual(state.books.map((book, index) => numberAt(state, book, index)), ["2", "4"]);
+    assert.equal(payload(state).reorder, true);
+    state.numbering = true;
+    assert.equal(payload(state).reorder, false);
+    assert.equal(numberAt(state, state.books[0], 0), "1");
+    state.numbering = false;
+    state.changes.series_index = "8";
+    assert.equal(numberAt(state, state.books[0], 0), "8");
+    assert.equal(payload(state).reorder, false);
+    delete state.changes.series_index;
+    reorderBook(state, 20, 1);
+    assert.deepEqual(payload(state).book_ids, [10, 20]);
+    reorderBook(state, 999, 0);
+    reorderBook(state, 10, -1);
+    assert.deepEqual(payload(state).book_ids, [10, 20]);
+    sortBooks(state, "selection");
+    assert.equal(payload(state).reorder, false);
+    assert.equal(numberAt(state, state.books[0], 0), "4");
+});
+
+test("workbench button and drag events enable saving reordered slots and keep title identity", async () => {
+    const ids = {}, results = {scrollTop: 0}, requests = [], options = {};
+    function element(id) {
+        return {id, dataset: {}, events: {}, scrollTop: 0, attributes: {},
+            addEventListener(name, callback) { this.events[name] = callback; },
+            setAttribute(name, value) { this.attributes[name] = value; },
+            querySelectorAll: () => [], focus() {}, scrollIntoView() {}};
+    }
+    const data = {fields: [], books: [1, 2, 3].map(id => ({id, version: "v" + id,
+        values: {title: "Title " + id, authors: "Author", series_index: String(3 + id * 2)}, system: {}, identifiers: {}}))};
+    const text = Object.fromEntries(["selected", "titleFor", "dragBook", "was", "editBooks", "apply", "fieldChanges", "titleChanges"].map(key => [key, key + " %(count)s %(id)s %(title)s"]));
+    text.reassignNumbers = "Reassign existing series numbers";
+    const document = {readyState: "complete", activeElement: null,
+        getElementById: id => ids[id] || (ids[id] = element(id)),
+        querySelector: () => ({value: "csrf", querySelectorAll: () => [], addEventListener() {}, classList: {toggle() {}}})};
+    document.getElementById("bulk-book-config").textContent = JSON.stringify({url: "/bulk", groups: [{id: "series", label: "Series"}], text});
+    const modal = document.getElementById("bulkBookModal");
+    modal.querySelector = () => results;
+    vm.runInNewContext(fs.readFileSync(require.resolve("../../cps/static/js/bulk-edit.js"), "utf8"), {
+        document, FormData, MutationObserver: class { observe() {} },
+        window: {Sortable: {create(target, settings) { options.drag = settings; return {option(key, value) { options[key] = value; }}; }},
+            jQuery: () => ({on() {}, modal() {}})},
+        async fetch(url, request) {
+            if (request?.method === "POST") requests.push(JSON.parse(request.body.get("payload")));
+            return {ok: true, headers: {get: () => "application/json"}, json: async () => request?.method === "POST" ? {success: true, results: []} : data};
+        }
+    });
+    await ids["bulk-book-edit"].events.click();
+    assert.equal(ids["bw-save"].disabled, true);
+    const click = dataset => modal.events.click({target: {closest: () => ({dataset})}});
+    click({move: "1", direction: "1"});
+    assert.equal(ids["bw-save"].disabled, false);
+    assert.match(ids["bw-changes"].innerHTML, /Reassign existing series numbers/);
+    assert.deepEqual([...ids["bw-sequence"].innerHTML.matchAll(/<tr data-book="(\d+)"/g)].map(match => match[1]), ["2", "1", "3"]);
+    modal.events.input({target: {tagName: "INPUT", dataset: {title: "2"}, value: "Edited title"}});
+    options.drag.onEnd({item: {dataset: {book: "1"}}, newIndex: 2});
+    assert.match(ids["bw-sequence"].innerHTML, /value="Edited title"/);
+    modal.events.click({target: {closest: () => ({id: "bw-save", dataset: {}})}});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(requests[0].book_ids, [2, 3, 1]);
+    assert.deepEqual(requests[0].titles, {2: "Edited title"});
+    assert.equal(requests[0].reorder, true);
+    assert.equal(requests[0].numbering, null);
+    assert.equal(options.disabled, true);
+});
+
 test("selection controls track mode and selected count through clearing and exiting", () => {
     function element() {
         const classes = new Set();
@@ -88,7 +158,7 @@ test("selection controls track mode and selected count through clearing and exit
     grid.querySelectorAll = () => cards;
     const document = {readyState: "complete", getElementById: id => ids[id], querySelector: () => grid, createElement: element};
     vm.runInNewContext(fs.readFileSync(require.resolve("../../cps/static/js/bulk-edit.js"), "utf8"), {
-        document, window: {jQuery: () => ({on() { return this; }})}, MutationObserver: class { observe() {} }
+        document, window: {Sortable: {create: () => ({option() {}})}, jQuery: () => ({on() { return this; }})}, MutationObserver: class { observe() {} }
     });
     const button = ids["bulk-book-select"];
     assert.equal(button.textContent, "Select");

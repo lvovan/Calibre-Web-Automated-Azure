@@ -81,6 +81,23 @@
         let manga = stored("manga") === "on";
         let rtl = stored("rtl") === "on";
         const prefetched = new Set();
+        const navigation = root.CwaNavigation.create({
+            position: () => app.page,
+            bounds: () => [1, Math.max(1, app.pagesCount)],
+            navigate: page => { app.page = page; },
+            onError: error => console.error("PDF page navigation failed", error)
+        });
+        // Capture the standard toolbar too, before pdf.js handles each individual click.
+        doc.addEventListener("click", event => {
+            const button = event.target.closest("#previous, #next, #firstPage, #lastPage");
+            if (!button || !app.pdfDocument) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (button.id === "firstPage" || button.id === "lastPage") {
+                navigation.jump(button.id === "firstPage" ? 1 : app.pagesCount);
+            } else navigation.move(button.id === "next" ? 1 : -1);
+        }, true);
+        doc.getElementById("pageNumber").addEventListener("change", () => navigation.cancel(), true);
 
         function render() {
             doc.body.classList.toggle("cwa-manga", manga);
@@ -123,7 +140,8 @@
 
         function turn(direction) {
             if (!direction) return false;
-            return direction > 0 ? app.pdfViewer.nextPage() : app.pdfViewer.previousPage();
+            navigation.move(direction);
+            return true;
         }
 
         function detect() {
@@ -171,16 +189,14 @@
                 const box = container.getBoundingClientRect();
                 turn(tapDirection(event.clientX - box.left, box.width, rtl));
             });
-            let start = null;
-            container.addEventListener("touchstart", event => {
-                start = event.touches.length === 1 ? {x: event.touches[0].clientX, y: event.touches[0].clientY} : null;
-            }, {passive: true});
-            container.addEventListener("touchend", event => {
-                if (!manga || !start || event.changedTouches.length !== 1 || zoomed()) { start = null; return; }
-                const touch = event.changedTouches[0];
-                const direction = swipeDirection(touch.clientX - start.x, touch.clientY - start.y, rtl);
-                start = null;
-                if (turn(direction)) event.preventDefault();
+            root.CwaNavigation.bindSwipe(container, {
+                move: turn,
+                rtl: () => manga && rtl,
+                enabled: () => !(root.visualViewport && root.visualViewport.scale > 1) &&
+                    container.scrollWidth <= container.clientWidth + 2 &&
+                    (!manga || !zoomed()) && (!app.pdfCursorTools || app.pdfCursorTools.activeTool === 0) &&
+                    app.pdfViewer.annotationEditorMode <= 0 &&
+                    (!app.pdfViewer || !app.pdfViewer.isInPresentationMode)
             });
         }
 

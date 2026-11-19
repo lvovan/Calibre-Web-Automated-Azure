@@ -15,6 +15,7 @@ import { Params } from './common/helpers.js';
 import { KthoomApp } from './kthoom.js';
 import { MenuEventType } from './menu.js';
 import { RemoteImagePage } from './page.js';
+import { FitMode } from './book-viewer-types.js';
 
 const cfg = window.cwaComic;
 
@@ -48,7 +49,9 @@ const sync = window.CwaProgressSync ? window.CwaProgressSync.create(cfg.progress
 
 /** 0-based page shown by a restore or synchronized jump; its page change is not saved as new progress. */
 let jumpPage = -1;
+let navigation = null;
 function showSyncedPage(page) {
+  if (navigation) navigation.cancel();
   if (page !== app.bookViewer_.lastNotifiedPageNum_) jumpPage = page;
   app.bookViewer_.showPage(page);
 }
@@ -175,6 +178,28 @@ async function loadPaged() {
 
 async function start() {
   await app.initializedPromise_;
+  const viewer = app.bookViewer_;
+  navigation = window.CwaNavigation.create({
+    position: () => viewer.getCurrentPageNum(),
+    bounds: () => [-Infinity, Infinity],
+    navigate: page => {
+      const total = app.readingStack_.getCurrentBook()?.getNumberOfPages() || 0;
+      if (!total) return;
+      viewer.showPage(((page % total) + total) % total);
+      if (viewer.getFitMode() === FitMode.Width && viewer.getNumPagesInViewer() < 3) window.scrollTo(0, 0);
+    },
+    onError: error => console.error('Comic page navigation failed', error),
+  });
+  // All page-turn controls (including page taps and keyboard arrows) share the same intent.
+  app.showNextPage = () => navigation.move(1);
+  app.showPrevPage = () => navigation.move(-1);
+  window.CwaNavigation.bindSwipe(document.getElementById('bookViewer'), {
+    move: delta => navigation.move(delta),
+    axis: () => viewer.getRotateTimes(),
+    enabled: () => !(window.visualViewport && window.visualViewport.scale > 1) &&
+      document.documentElement.scrollWidth <= window.innerWidth + 2 &&
+      !app.readingStack_.isOpen(),
+  });
   if (app.mainMenu_) {
     app.mainMenu_.addEventListener(MenuEventType.ITEM_SELECTED, (evt) => {
       if (evt.item.id === 'menu-sync-now' && sync) sync.syncNow();

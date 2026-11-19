@@ -57,6 +57,13 @@ PDFs with text open in the full PDF viewer (search, text selection). Each reader
 other ("Open in PDF viewer" in the page view menu, "Page view" in the PDF tools menu); both share
 the same page progress. The original file is still downloadable from the book page.
 
+All web readers support horizontal touch swipes to turn pages, respecting the reading direction
+where supported. Vertical scrolling, pinch gestures and zoomed-image panning remain native. Page
+turns from clicks, taps and swipes are accumulated over a 160 ms quiet period and jump directly to
+the destination rather than rendering every skipped page. Reflowable EPUBs measure crossed chapters
+to find the exact viewport-dependent destination; image readers request only the destination and
+their usual adjacent-page prefetches.
+
 ### Library search
 
 Search matches whole words, plurals and quoted phrases. When nothing matches as typed, it retries

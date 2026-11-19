@@ -106,6 +106,7 @@
     }
 
     calibre.onRemoteProgress = async function (state) {
+        if (calibre.navigation) calibre.navigation.cancel();
         userMoved = false;
         navigated = true;
         try {

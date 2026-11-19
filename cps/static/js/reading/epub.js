@@ -153,8 +153,6 @@ var reader;
             reader.rendition.setZoom(Number(this.value));
             calibre.storage.set(calibre.storageKey + ".zoom", this.value);
         });
-        ["touchstart", "touchend"].forEach(name => document.getElementById("viewer").addEventListener(name,
-            event => reader.rendition.emit(name, event), {passive: true}));
         // The sidebar lists every page; chapter titles from the book's TOC label the pages they start on.
         reader.book.loaded.navigation.then(function (navigation) {
             const chapters = new Map();
@@ -243,41 +241,7 @@ var reader;
         $("#bookmark, #show-Bookmarks").remove();
     }
 
-    // Enable swipe support
-    // I have no idea why swiperRight/swiperLeft from plugins is not working, events just don't get fired
-    var touchStart = 0;
-    var touchEnd = 0;
-    var touchY = 0;
-
-    if (reader && reader.rendition) {
-        reader.rendition.on('touchstart', function(event) {
-            if (event.touches.length !== 1) { touchStart = null; return; }
-            touchStart = event.changedTouches[0].screenX;
-            touchY = event.changedTouches[0].screenY;
-        });
-        reader.rendition.on('touchend', function(event) {
-            if (touchStart === null || event.touches.length || (reader.rendition.zoom && reader.rendition.zoom > 1)) return;
-            touchEnd = event.changedTouches[0].screenX;
-            const distance = Math.abs(touchEnd - touchStart);
-            if (distance < 40 || distance < Math.abs(event.changedTouches[0].screenY - touchY)) return;
-            if (touchStart < touchEnd) {
-                if(reader.book.package.metadata.direction === "rtl") {
-					reader.rendition.next();
-				} else {
-					reader.rendition.prev();
-				}
-                // Swiped Right
-            }
-            if (touchStart > touchEnd) {
-                if(reader.book.package.metadata.direction === "rtl") {
-					reader.rendition.prev();
-				} else {
-                    reader.rendition.next();
-				}
-                // Swiped Left
-            }
-        });
-    }
+    window.CwaEpubNavigation.attach(reader, calibre);
 
     /**
      * @param {string} action - Add or remove bookmark

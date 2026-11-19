@@ -11,7 +11,7 @@
   {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='kthoom/kthoom.css') }}" type="text/css">
   <link rel="stylesheet" href="{{ url_for('static', filename='kthoom/cwa.css') }}" type="text/css">
-  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='kthoom/favicon.svg') }}">
+  {% include 'app_icons.html' %}
   <script>
     window.cwaComic = {
       title: {{ title|tojson }},
@@ -29,6 +29,7 @@
     };
   </script>
   <script src="{{ url_for('static', filename='js/reading/progress-sync.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/reading/navigation.js') }}"></script>
   <script type="module" src="{{ url_for('static', filename='kthoom/cwa-main.js') }}"></script>
 </head>
 

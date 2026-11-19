@@ -41,14 +41,7 @@ $(document).ready(function() {
     $( "#right" ).click(function() {
         nextPage();
     });
-    $("#readmain").swipe( {
-        swipeRight:function() {
-            prevPage();
-        },
-        swipeLeft:function() {
-            nextPage();
-        },
-    });
+    window.CwaNavigation.bindSwipe($("#readmain")[0], {move: delta => navigation.move(delta)});
 
     //bind mouse
     $(window).bind('DOMMouseScroll mousewheel', function(event) {
@@ -69,24 +62,20 @@ $(document).ready(function() {
     var origwidth = $("#content")[0].getBoundingClientRect().width;
     var gap = 20;
     var baseLeft = $("#content").offset().left;
-    var leftoff;
+    var navigation = window.CwaNavigation.create({
+        position: currentPage,
+        bounds: () => [0, pageCount() - 1],
+        navigate: page => {
+            $("#content").offset({left: baseLeft - page * (origwidth + gap)});
+            saveProgress();
+        },
+        onError: error => console.error("TXT page navigation failed", error)
+    });
     function prevPage() {
-        if($("#content").offset().left > 0) {
-            return;
-        }
-        leftoff = $("#content").offset().left;
-        leftoff = leftoff+origwidth+gap;
-        $("#content").offset({left:leftoff});
-        saveProgress();
+        navigation.move(-1);
     }
     function nextPage() {
-        leftoff = $("#content").offset().left;
-        leftoff = leftoff-origwidth-gap;
-        if (leftoff + $("#content")[0].scrollWidth < 0) {
-            return;
-        }
-        $("#content").offset({left:leftoff});
-        saveProgress();
+        navigation.move(1);
     }
 
     // Per-user progress shared across devices. KOReader cannot map web TXT pages, so only the
@@ -104,6 +93,7 @@ $(document).ready(function() {
     }
     function goToFraction(fraction) {
         if (fraction === null) return;
+        navigation.cancel();
         var page = Math.min(pageCount() - 1, Math.max(0, Math.floor(fraction * pageCount())));
         $("#content").offset({left: baseLeft - page * (origwidth + gap)});
     }

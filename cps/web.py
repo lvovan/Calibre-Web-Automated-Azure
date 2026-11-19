@@ -48,6 +48,7 @@ from .kobo_sync_status import remove_synced_book
 from . import magic_shelf
 from . import comic_pages as comic_archive
 from . import epub_resources
+from . import pdf_pages
 from .render_template import render_title_template
 from .kobo_sync_status import change_archived_books
 from . import limiter
@@ -1972,6 +1973,8 @@ def serve_book(book_id, book_format, anyname):
 
 
 COMIC_PAGE_FORMATS = ("cbz", "cbt", "cbr")
+# Formats the page-by-page reader can show; PDF pages are served as images by pdf_pages.
+PAGED_FORMATS = COMIC_PAGE_FORMATS + ("pdf",)
 
 
 def _epub_path(book_id, book_format):
@@ -2016,7 +2019,7 @@ def epub_resource(book_id, book_format, version, resource):
 def _comic_archive_path(book_id, book_format):
     """Returns the local path of a comic archive the current user may read, or None."""
     book_format = book_format.lower()
-    if book_format not in COMIC_PAGE_FORMATS or config.config_use_google_drive:
+    if book_format not in PAGED_FORMATS or config.config_use_google_drive:
         return None
     book = calibre_db.get_filtered_book(book_id)
     if not book:
@@ -2036,8 +2039,11 @@ def comic_pages(book_id, book_format):
     if not path:
         abort(404)
     try:
-        pages = comic_archive.list_pages(path, config.config_rarfile_location)
-    except (comic_archive.ComicArchiveError, OSError) as ex:
+        if book_format.lower() == "pdf":
+            pages = pdf_pages.list_pages(path)
+        else:
+            pages = comic_archive.list_pages(path, config.config_rarfile_location)
+    except (comic_archive.ComicArchiveError, pdf_pages.PdfPageError, OSError) as ex:
         log.warning("Comic reader cannot list pages of book %s: %s", book_id, ex)
         abort(404)
     response = jsonify(pages=pages)
@@ -2054,16 +2060,21 @@ def comic_page(book_id, book_format, index):
         abort(404)
     try:
         stat = os.stat(path)
-        etag = "{:x}-{:x}-{}".format(stat.st_mtime_ns, stat.st_size, index)
+        is_pdf = book_format.lower() == "pdf"
+        size = pdf_pages.clamp_size(request.args.get("size")) if is_pdf else None
+        etag = f"{stat.st_mtime_ns:x}-{stat.st_size:x}-{index}" + (f"-{size}" if is_pdf else "")
         if etag in request.if_none_match:
             response = make_response("", 304)
         else:
-            data, mime = comic_archive.read_page(path, index, config.config_rarfile_location)
+            if is_pdf:
+                data, mime = pdf_pages.read_page(path, index, size)
+            else:
+                data, mime = comic_archive.read_page(path, index, config.config_rarfile_location)
             response = make_response(data)
             response.mimetype = mime
     except IndexError:
         abort(404)
-    except (comic_archive.ComicArchiveError, OSError) as ex:
+    except (comic_archive.ComicArchiveError, pdf_pages.PdfPageError, OSError) as ex:
         log.warning("Comic reader cannot read page %s of book %s: %s", index, book_id, ex)
         abort(404)
     response.set_etag(etag)
@@ -2996,9 +3007,32 @@ def read_book(book_id, book_format):
                                      epub_data=epub_data, progress_sync=progress_sync,
                                      book_format=book_format.lower())
     elif book_format.lower() == "pdf":
+        # Image-only PDFs (scans, comics, manga) open in the page-by-page reader, which receives one
+        # image per page from the server; other PDFs open in pdf.js. ?mode= overrides the choice.
+        mode = request.args.get("mode")
+        pdf_path = _comic_archive_path(book_id, "pdf") if pdf_pages.available else None
+        if pdf_path and mode != "pdfjs":
+            try:
+                paged = mode == "pages" or pdf_pages.is_image_only(pdf_path)
+            except (pdf_pages.PdfPageError, OSError) as ex:
+                log.warning("Page-by-page reader cannot open PDF %s: %s", book_id, ex)
+                paged = False
+            if paged:
+                log.debug("Start page-by-page pdf reader for %d", book_id)
+                title = book.title
+                if len(book.series):
+                    title = title + " - " + book.series[0].name
+                    if book.series_index:
+                        title = title + " #" + f"{book.series_index:.2f}".rstrip('0').rstrip('.')
+                return render_title_template('readcbr.html', comicfile=str(book_id), title=title,
+                                             extension="pdf", bookmark=bookmark, progress_sync=progress_sync,
+                                             pdfjs_url=url_for('web.read_book', book_id=book_id,
+                                                               book_format='pdf', mode='pdfjs'))
         log.debug("Start pdf reader for %d", book_id)
         return render_title_template('readpdf.html', pdffile=book_id, title=book.title,
-                                     progress_sync=progress_sync)
+                                     progress_sync=progress_sync,
+                                     pages_url=url_for('web.read_book', book_id=book_id, book_format='pdf',
+                                                       mode='pages') if pdf_path else None)
     elif book_format.lower() == "txt":
         log.debug("Start txt reader for %d", book_id)
         return render_title_template('readtxt.html', txtfile=book_id, title=book.title,

@@ -81,3 +81,7 @@ comicapi>=2.2.0,<3.3.0
 # Kobo integration
 jsonschema>=3.2.0,<4.24.0
 curl-cffi>=0.6.0,<0.7.0
+
+# Page-by-page PDF reader
+pypdfium2>=4.30,<6
+Pillow>=10.0,<14

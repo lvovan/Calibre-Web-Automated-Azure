@@ -54,8 +54,15 @@ See https://github.com/adobe-type-tools/cmap-resources
     <script>
       window.cwaPdf = {progressSync: {{ progress_sync|tojson }}, csrfToken: {{ csrf_token()|tojson }},
                        bookId: {{ pdffile|tojson }}, userId: {{ current_user.id|string|tojson }}};
+      {% if pages_url %}
+      document.addEventListener('DOMContentLoaded', function () {
+        var button = document.getElementById('cwaPageView');
+        if (button) button.addEventListener('click', function () { window.location.href = {{ pages_url|tojson }}; });
+      });
+      {% endif %}
     </script>
     <style>
+      #cwaPageView::before { -webkit-mask-image: var(--secondaryToolbarButton-spreadNone-icon); mask-image: var(--secondaryToolbarButton-spreadNone-icon); }
       #cwaMangaMode::before { -webkit-mask-image: var(--secondaryToolbarButton-scrollPage-icon); mask-image: var(--secondaryToolbarButton-scrollPage-icon); }
       #cwaMangaRtl::before { -webkit-mask-image: var(--secondaryToolbarButton-spreadEven-icon); mask-image: var(--secondaryToolbarButton-spreadEven-icon); transform: scaleX(-1); }
       #cwaSyncNow::before { -webkit-mask-image: var(--secondaryToolbarButton-rotateCw-icon); mask-image: var(--secondaryToolbarButton-rotateCw-icon); }
@@ -304,6 +311,11 @@ See https://github.com/adobe-type-tools/cmap-resources
 {% if progress_sync %}
             <button id="cwaSyncNow" class="secondaryToolbarButton" title="{{_('Sync progress now')}}" tabindex="69">
               <span>{{_('Sync progress now')}}</span>
+            </button>
+{% endif %}
+{% if pages_url %}
+            <button id="cwaPageView" class="secondaryToolbarButton" title="{{_('Page view: fast page-by-page reading for scanned books, comics and manga')}}" tabindex="69">
+              <span>{{_('Page view')}}</span>
             </button>
 {% endif %}
 

@@ -23,6 +23,8 @@
       useBookmarks: {{ current_user.is_authenticated|tojson }},
       csrfToken: {{ csrf_token()|tojson }},
       progressSync: {{ progress_sync|tojson }},
+      sizedPages: {{ (extension == 'pdf')|tojson }},
+      fallbackUrl: {{ (pdfjs_url or none)|tojson }},
       staticBase: {{ url_for('static', filename='kthoom/')|tojson }}
     };
   </script>
@@ -199,6 +201,13 @@
       <li role="none">
         <button id="menu-sync-now" class="menuItem" role="menuitem" tabindex="-1">
           <span class="menuItemText">{{_('Sync progress now')}}</span>
+        </button>
+      </li>
+      {% endif %}
+      {% if pdfjs_url %}
+      <li role="none">
+        <button id="menu-open-pdfjs" class="menuItem" role="menuitem" tabindex="-1">
+          <span class="menuItemText">{{_('Open in PDF viewer (search, select text)')}}</span>
         </button>
       </li>
       {% endif %}

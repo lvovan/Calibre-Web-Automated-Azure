@@ -150,12 +150,24 @@ function restoreBookmark(book) {
   }, 250);
 }
 
+/**
+ * @returns {string} Query string asking the server for page images matched to this screen (PDF pages
+ *     are rendered at a requested size; image archives ignore it).
+ */
+function pageSizeQuery() {
+  if (!cfg.sizedPages) return '';
+  const longSide = Math.max(window.screen.width || 0, window.screen.height || 0, 800) *
+      (window.devicePixelRatio || 1);
+  return '?size=' + Math.min(3200, Math.ceil(longSide / 400) * 400);
+}
+
 async function loadPaged() {
   const resp = await fetch(cfg.manifestUrl, { credentials: 'same-origin' });
   if (!resp.ok) return null;
   const manifest = await resp.json();
   if (!manifest || !Array.isArray(manifest.pages) || manifest.pages.length === 0) return null;
-  pageUrls = manifest.pages.map((_, i) => cfg.pageUrlBase + i);
+  const query = pageSizeQuery();
+  pageUrls = manifest.pages.map((_, i) => cfg.pageUrlBase + i + query);
   const pages = manifest.pages.map((p, i) =>
     new RemoteImagePage(p.name, p.mime, pageUrls[i], p.w, p.h));
   return app.loadSingleBookFromPageList(cfg.title, pages);
@@ -163,19 +175,25 @@ async function loadPaged() {
 
 async function start() {
   await app.initializedPromise_;
-  if (sync && app.mainMenu_) {
+  if (app.mainMenu_) {
     app.mainMenu_.addEventListener(MenuEventType.ITEM_SELECTED, (evt) => {
-      if (evt.item.id === 'menu-sync-now') sync.syncNow();
+      if (evt.item.id === 'menu-sync-now' && sync) sync.syncNow();
+      else if (evt.item.id === 'menu-open-pdfjs' && cfg.fallbackUrl) window.location.href = cfg.fallbackUrl;
     });
   }
   let book = null;
   try {
     book = await loadPaged();
   } catch (err) {
-    console.warn('Page-by-page loading unavailable, loading the whole book', err);
+    console.warn('Page-by-page loading unavailable', err);
   }
   if (book) {
     restoreBookmark(book);
+    return;
+  }
+  if (cfg.fallbackUrl) {
+    // Formats kthoom cannot unpack itself (PDF) fall back to their own reader.
+    window.location.replace(cfg.fallbackUrl);
     return;
   }
   app.loadSingleBookFromFetch(cfg.title, cfg.serveUrl, { credentials: 'same-origin' });

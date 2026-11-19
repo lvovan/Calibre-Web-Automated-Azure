@@ -50,6 +50,13 @@ turns by tapping the screen edges, swiping or arrow keys, optional right-to-left
 pages loaded ahead. It turns on automatically for PDFs without text (scans and comics) unless the
 user switched it off for that book.
 
+PDFs made only of page images (scans, comics, manga) open in the **page view** by default: the server
+sends one image per page (the page's own JPEG when possible, otherwise rendered with PDFium to fit
+the screen), so even PDFs of hundreds of megabytes open instantly and are never downloaded whole.
+PDFs with text open in the full PDF viewer (search, text selection). Each reader can switch to the
+other ("Open in PDF viewer" in the page view menu, "Page view" in the PDF tools menu); both share
+the same page progress. The original file is still downloadable from the book page.
+
 ### Library search
 
 Search matches whole words, plurals and quoted phrases. When nothing matches as typed, it retries

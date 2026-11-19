@@ -178,6 +178,9 @@ def _read_text(path: str, default: str = "") -> str:
 # Avoid any network or slow I/O during module import.
 INSTALLED_VERSION = os.environ.get("CWA_INSTALLED_VERSION") or _read_text("/app/CWA_RELEASE", "v0.0.0")
 STABLE_VERSION = os.environ.get("CWA_STABLE_VERSION") or _read_text("/app/CWA_STABLE_RELEASE", "v0.0.0")
+# Unique per image build (UTC YYYYMMDD.HHMMSS), to check which build is deployed.
+BUILD_NUMBER = _read_text("/app/CWA_BUILD_NUMBER", "dev")
+BUILD_DATE = _read_text("/app/CWA_BUILD_DATE")
 
 USER_AGENT = f"Calibre-Web-Automated/{INSTALLED_VERSION}"
 

@@ -39,6 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.meta.outputs.image }}
+      build_number: ${{ steps.meta.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,7 +55,9 @@ jobs:
           echo "repo=${repo}" >> "$GITHUB_OUTPUT"
           echo "image=${repo}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "version=${base_version}-azure.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          now=$(date -u +%s)
+          echo "build_date=$(date -u -d "@${now}" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "build_number=$(date -u -d "@${now}" +%Y%m%d.%H%M%S)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -75,6 +78,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
             VERSION=${{ steps.meta.outputs.version }}
+            BUILD_NUMBER=${{ steps.meta.outputs.build_number }}
             INSTALL_KEPUBIFY=false
             UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu/ http://mirrors.edge.kernel.org/ubuntu/ http://archive.ubuntu.com/ubuntu/
             PIP_EXCLUDE=google-api-python-client PyDrive2 oauth2client google-auth-oauthlib goodreads python-Levenshtein python-ldap Flask-SimpleLDAP scholarly
@@ -86,6 +90,7 @@ jobs:
       - name: Smoke-test image
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
+          BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
         run: |
           docker run -d --name cwa -p 8083:8083 -e NETWORK_SHARE_MODE=true "$IMAGE"
           ok=0
@@ -96,10 +101,12 @@ jobs:
           # Web uploads run as abc and write to the ingest dir (an anonymous Docker volume)
           writable=0
           docker exec cwa s6-setuidgid abc sh -c 'touch /cwa-book-ingest/.w && rm /cwa-book-ingest/.w' && writable=1
+          build=$(curl -fsS http://localhost:8083/version | jq -r .build || true)
           docker logs cwa 2>&1 | tail -n 60
           docker rm -f cwa > /dev/null
           if [ "$ok" != 1 ]; then echo "::error::Image did not become healthy within 5 minutes"; exit 1; fi
           if [ "$writable" != 1 ]; then echo "::error::/cwa-book-ingest is not writable by abc"; exit 1; fi
+          if [ "$build" != "$BUILD_NUMBER" ]; then echo "::error::/version returned build '${build}', expected ${BUILD_NUMBER}"; exit 1; fi
 
   deploy:
     needs: build
@@ -177,15 +184,22 @@ jobs:
         if: always() && steps.stop.outputs.app != ''
         run: az webapp start -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n "${{ steps.stop.outputs.app }}" -o none
 
-      - name: Wait for /health
+      # Healthy is not enough: the app must also report the build number of the image just built
+      - name: Wait for /health and the new build
         if: steps.deploy.outputs.content_configured == 'true'
+        env:
+          EXPECTED_BUILD: ${{ needs.build.outputs.build_number }}
         run: |
-          url="${{ steps.deploy.outputs.default_url }}/health"
+          base="${{ steps.deploy.outputs.default_url }}"
           for i in $(seq 1 60); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url" || true)
-            echo "Attempt $i: HTTP $code"
-            if [ "$code" = "200" ]; then exit 0; fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$base/health" || true)
+            build=$(curl -s --max-time 20 "$base/version" | jq -r '.build // empty' 2>/dev/null || true)
+            echo "Attempt $i: HTTP $code, build ${build:-?} (expected ${EXPECTED_BUILD:-any})"
+            if [ "$code" = "200" ] && { [ -z "$EXPECTED_BUILD" ] || [ "$build" = "$EXPECTED_BUILD" ]; }; then
+              echo "- Build: ${build}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             sleep 20
           done
-          echo "::error::App did not become healthy within 20 minutes. Check Log stream / AppServiceConsoleLogs."
+          echo "::error::App did not become healthy on build ${EXPECTED_BUILD} within 20 minutes. Check Log stream / AppServiceConsoleLogs."
           exit 1

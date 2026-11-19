@@ -54,6 +54,7 @@ def test_forwarded_host_cannot_bypass(wsgi):
 
 def test_health_exempt_on_any_host(wsgi):
     assert _call(wsgi, "app-cwa.azurewebsites.net", "/health")[0] == "200 OK"
+    assert _call(wsgi, "app-cwa.azurewebsites.net", "/version")[0] == "200 OK"
     assert _call(wsgi, "app-cwa.azurewebsites.net", "/health/x")[0] == "404 Not Found"
 
 

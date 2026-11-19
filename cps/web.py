@@ -1008,7 +1008,19 @@ def health_check():
         "status": "ok" if db_up else "degraded",
         "uptime": uptime,
         "version": f"CWA/{constants.INSTALLED_VERSION}",
+        "build": constants.BUILD_NUMBER,
     }), 200 if db_up else 503
+
+
+@web.route("/version")
+def version_info():
+    response = jsonify({
+        "build": constants.BUILD_NUMBER,
+        "version": constants.INSTALLED_VERSION,
+        "build_date": constants.BUILD_DATE,
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 # ################################### View Books list ##################################################################
 

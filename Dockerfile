@@ -334,6 +334,12 @@ RUN \
 # Add unrar from unrar stage
 COPY --from=unrar /usr/bin/unrar-ubuntu /usr/bin/unrar
 
+# Unique UTC build number (YYYYMMDD.HHMMSS) returned by /version. Generated here when not
+# passed in. Declared late so a new value only rebuilds this small layer.
+ARG BUILD_NUMBER
+RUN echo "${BUILD_NUMBER:-$(date -u +%Y%m%d.%H%M%S)}" >| /app/CWA_BUILD_NUMBER && \
+  echo "${BUILD_DATE}" >| /app/CWA_BUILD_DATE
+
 # Set calibre environment variable
 ENV CALIBRE_CONFIG_DIR=/config/.config/calibre
 

@@ -19,7 +19,7 @@ ENV_VAR = "CWA_ALLOWED_HOSTS"
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 # Paths served on any host so platform health probes keep working.
-_EXEMPT_PATHS = {"/health"}
+_EXEMPT_PATHS = {"/health", "/version"}
 
 
 def parse_allowed_hosts(value):

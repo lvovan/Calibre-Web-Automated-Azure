@@ -238,3 +238,29 @@ test("image-page progress uses the renderer's page percentage", async () => {
 test("books outside CWA retain their original renderTo behavior", () => {
     assert.equal(mangaHarness({cwa: false}).rendition, "original-renderer");
 });
+
+function element(name, children = []) {
+    return {nodeType: 1, localName: name, childNodes: children};
+}
+
+async function offeredCandidate(sections) {
+    // Auberon-like novel: one long chapter at spine index 5 among nine tiny front/back-matter files.
+    const paragraphs = Array.from({length: 18}, () => element("p", [{nodeType: 3, nodeValue: "word ".repeat(120)}]));
+    const body = element("body", [element("div", [element("section", paragraphs)])]);
+    const offers = [];
+    const candidate = {document: "kindlehash", progress: "/body/DocFragment[6]/body/div/section/p[18]/text().477",
+        percentage: 0.1188, device: "KindleOasis2", timestamp: 1};
+    const sync = Object.assign(fakeSync(), {candidates: [candidate], offer: state => offers.push(state)});
+    const h = progressHarness({manga: true, exact: true, sync});
+    const spine = Array.from({length: 10}, (_, index) => ({linear: true, index, url: "s" + index, cfiBase: "/6/" + (index + 1) * 2}));
+    Object.assign(h.reader.book, {spine: {spineItems: spine, get: index => spine[index]}, load: async () => ({body})});
+    if (sections) h.calibre.epubData = {sections: spine.map(({index}) => ({index, size: index === 5 ? 100000 : 100}))};
+    await h.finish();
+    await new Promise(resolve => setImmediate(resolve));
+    return offers;
+}
+
+test("KOReader positions are checked against document sizes, not section counts", async () => {
+    assert.deepEqual((await offeredCandidate(true)).map(state => state.document), ["kindlehash"]);
+    assert.deepEqual(await offeredCandidate(false), []);
+});

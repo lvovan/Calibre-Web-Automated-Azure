@@ -84,10 +84,26 @@ def test_converter_comic_pages_use_the_image_renderer(tmp_path):
     assert "image" not in pages[9] and pages[9]["href"] == "OEBPS/p9.xhtml"
 
 
+def test_kindle_panel_view_pages_use_the_image_renderer(tmp_path):
+    # KCC Panel View repeats the page raster in hidden zoom panels behind href-less magnify links.
+    panel = '<div id="PV-{1}"><a class="app-amzn-magnify" style="display:inline-block"></a></div>' \
+            '<div class="PV-P" id="PV-{1}-P"><img style="position:absolute;left:0" src="images/p{0}.png"/></div>'
+    page = '<div><img src="images/p{0}.png"/></div><div id="PV">' + "".join(
+        panel.replace("{1}", corner) for corner in ("TL", "TR", "BL", "BR")) + "</div>"
+    path = make_epub(tmp_path / "panels.epub", bodies=[page.format(i) for i in range(5)])
+    assert [page.get("image") for page in epub.describe(path)["pages"]] == [f"OEBPS/images/p{i}.png" for i in range(5)]
+
+    mixed = make_epub(tmp_path / "mixed.epub", bodies=['<img src="images/p0.png"/><img src="images/p1.png"/>'] * 5)
+    assert epub.describe(mixed)["pages"] == []
+
+
 def test_novel_with_cover_is_not_manga(tmp_path):
     path = make_epub(tmp_path / "novel.epub", bodies=['<img src="images/p0.png"/>'] +
                      ['<p>' + 'Chapter prose. ' * 100 + '</p>'] * 20)
-    assert not epub.describe(path)["manga"]
+    metadata = epub.describe(path)
+    assert not metadata["manga"]
+    assert [section["index"] for section in metadata["sections"]] == list(range(21))
+    assert metadata["sections"][1]["size"] > metadata["sections"][0]["size"]
 
 
 def test_declared_fixed_layout_is_respected(tmp_path):

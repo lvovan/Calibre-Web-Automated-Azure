@@ -897,7 +897,7 @@ def reader_progress_config(book_id: int, book_format: str | None = None) -> dict
         state = _serialize_web_progress(_web_progress_record(int(current_user.id), book_id))
         if (book_format or "").lower() in ("epub", "kepub"):
             candidates = [dict(_serialize_web_progress(record), document=record.document)
-                          for record in _unmatched_progress(int(current_user.id), state and state["timestamp"])]
+                          for record in _unmatched_progress(int(current_user.id), state)]
     except SQLAlchemyError as e:
         log.warning(f"Could not load reading progress for book {book_id}: {e}")
         state = None
@@ -925,8 +925,12 @@ def reader_progress_config(book_id: int, book_format: str | None = None) -> dict
 MAX_LINK_CANDIDATES = 10
 
 
-def _unmatched_progress(user_id: int, newer_than: float | None = None) -> list[KOSyncProgress]:
-    """The user's newest EPUB progress records whose document hash matches no library file."""
+def _unmatched_progress(user_id: int, current: dict[str, Any] | None = None) -> list[KOSyncProgress]:
+    """The user's newest EPUB progress records whose document hash matches no library file.
+
+    With `current` (the book's serialized state), only records newer or further along are kept: merely
+    opening a book in the web reader saves a fresh position near the start, which must not hide one.
+    """
     from ... import calibre_db
     from ...db import BookFormatChecksum
 
@@ -935,8 +939,10 @@ def _unmatched_progress(user_id: int, newer_than: float | None = None) -> list[K
         KOSyncProgress.progress.like("/body/DocFragment%")
     ).order_by(desc(KOSyncProgress.timestamp)).limit(MAX_LINK_CANDIDATES * 5).all()
         if not record.document.isdigit()]
-    if newer_than is not None:
-        records = [record for record in records if _serialize_web_progress(record)["timestamp"] > newer_than]
+    if current is not None:
+        records = [record for record in records
+                   if (state := _serialize_web_progress(record))["timestamp"] > current["timestamp"]
+                   or state["percentage"] > current["percentage"]]
     if not records:
         return []
     known = {row[0] for row in calibre_db.session.query(BookFormatChecksum.checksum).filter(
@@ -965,10 +971,20 @@ def link_reader_progress(book_id: int):
     if book_format not in ("EPUB", "KEPUB") or not any(item.format.upper() == book_format for item in book.data):
         return jsonify({"message": "Invalid format field"}), 400
     try:
-        if document not in {record.document for record in _unmatched_progress(int(current_user.id))}:
+        linked = next((record for record in _unmatched_progress(int(current_user.id))
+                       if record.document == document), None)
+        if linked is None:
             return jsonify({"message": "Progress record not found"}), 404
         if not store_checksum(book_id, book_format, document):
             return jsonify({"message": "Could not link reading progress"}), 500
+        # The reader chose this position: a later web reader position (e.g. saved on opening) must not win.
+        ub.session.query(KOSyncProgress).filter(
+            KOSyncProgress.user_id == int(current_user.id),
+            KOSyncProgress.document == str(book_id),
+            KOSyncProgress.device == WEB_DEVICE_NAME,
+            KOSyncProgress.timestamp > linked.timestamp
+        ).delete(synchronize_session=False)
+        ub.session.commit()
         log.info(f"Linked KOReader document {document} to book {book_id} for user {current_user.id}")
         return jsonify(_serialize_web_progress(_web_progress_record(int(current_user.id), book_id)) or {})
     except SQLAlchemyError as e:

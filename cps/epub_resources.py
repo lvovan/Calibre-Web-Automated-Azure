@@ -89,7 +89,7 @@ def _inspect_page(archive, item, resources):
     """Return (image_focused, image) where image is set only for a page that shows nothing but one raster.
 
     Comic/manga converters (KCC, Calibre) wrap each scan in styled XHTML, often inside an SVG
-    <image>; such pages can be shown as the raster alone. Pages with any visible text, several
+    <image>; such pages can be shown as the raster alone. Pages with any visible text, several distinct
     images or interactive/media content keep their XHTML.
     """
     if item["mime"] in _RASTER_TYPES:
@@ -101,16 +101,21 @@ def _inspect_page(archive, item, resources):
     images = [node for node in body.iter() if _tag(node) in ("img", "image")]
     text = " ".join(_visible_text(body).split())
     image_focused = bool(images) and len(text) <= 80
-    if text or len(images) != 1 or any(_tag(node) in _ACTIVE or _TRANSFORM.search(node.get("style", "") + (
+    if text or not images or any(_tag(node) in _ACTIVE or _TRANSFORM.search(node.get("style", "") + (
             node.text or "" if _tag(node) == "style" else "")) for node in doc.iter()):
         return image_focused, None
-    image = images[0]
-    href = image.get("src") if _tag(image) == "img" else (
-        image.get("{http://www.w3.org/1999/xlink}href") or image.get("href"))
-    try:
-        target = _resolve(item["href"], href or "")
-    except EpubResourceError:
+    # Kindle Panel View (KCC) repeats the page raster in hidden zoom panels: still one image.
+    targets = set()
+    for image in images:
+        href = image.get("src") if _tag(image) == "img" else (
+            image.get("{http://www.w3.org/1999/xlink}href") or image.get("href"))
+        try:
+            targets.add(_resolve(item["href"], href or ""))
+        except EpubResourceError:
+            return image_focused, None
+    if len(targets) != 1:
         return image_focused, None
+    target = targets.pop()
     return image_focused, target if resources.get(target) in _RASTER_TYPES else None
 
 
@@ -159,7 +164,8 @@ def describe(path):
             layout = next((node.text for node in package.findall("{*}metadata/{*}meta")
                            if node.get("property") == "rendition:layout"), "reflowable")
             display_options = "META-INF/com.apple.ibooks.display-options.xml"
-            if display_options in archive.namelist():
+            names = set(archive.namelist())
+            if display_options in names:
                 resources[display_options] = "application/xml"
                 options = _xml(archive, display_options)
                 if any(node.get("name") == "fixed-layout" and node.text == "true" for node in options.iter()):
@@ -201,7 +207,10 @@ def describe(path):
                     pages = []
             result = {"revision": version, "opf": opf, "resources": resources,
                       "layout": layout, "direction": spine_node.get("page-progression-direction", "ltr"),
-                      "manga": recommended, "pages": pages}
+                      "manga": recommended, "pages": pages,
+                      # Uncompressed size per reading-order document: a cheap length estimate for positions.
+                      "sections": [{"index": item["index"], "size": archive.getinfo(item["href"]).file_size}
+                                   for item in spine if item["href"] in names]}
     except (KeyError, ET.ParseError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as ex:
         raise EpubResourceError(f"Cannot read EPUB: {ex}") from ex
     with _cache_lock:

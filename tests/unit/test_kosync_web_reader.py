@@ -206,10 +206,18 @@ def test_reader_config_is_only_provided_when_sync_is_available(env):
         env.state.enabled = False
         assert env.kosync.reader_progress_config(BOOK_ID) is None
 
-def _koreader_record(env, document, progress="/body/DocFragment[6]/body/p[18]/text().477", when=2025, user=0):
+def _koreader_record(env, document, progress="/body/DocFragment[6]/body/p[18]/text().477", when=2025, user=0,
+                     percentage=11.88):
     env.session.add(env.models.KOSyncProgress(
-        user_id=env.users[user].id, document=document, progress=progress, percentage=11.88,
+        user_id=env.users[user].id, document=document, progress=progress, percentage=percentage,
         device="KindleOasis2", device_id="kindle-1", timestamp=datetime(when, 1, 1, tzinfo=timezone.utc)))
+    env.session.commit()
+
+
+def _web_record(env, when, percentage):
+    env.session.add(env.models.KOSyncProgress(user_id=env.users[0].id, document=str(BOOK_ID), progress="3",
+                                              percentage=percentage, device="CWA Web Reader", device_id="web",
+                                              timestamp=datetime(when, 1, 1, tzinfo=timezone.utc)))
     env.session.commit()
 
 
@@ -232,23 +240,21 @@ def linking(env, monkeypatch):
     return env
 
 
-def test_reader_config_offers_only_newer_unmatched_koreader_progress(linking):
+def test_reader_config_offers_only_newer_or_further_unmatched_koreader_progress(linking):
     env = linking
     env.session.add(env.models.BookFormatChecksum(book=7, format="EPUB", checksum="known"))
     env.session.commit()
     _koreader_record(env, "known")
-    _koreader_record(env, "stale", when=2020)
+    _koreader_record(env, "stale", when=2020, percentage=2.0)
     _koreader_record(env, "pdfpage", progress="12")
     _koreader_record(env, "otheruser", user=1)
     _koreader_record(env, "kindlehash")
-    env.session.add(env.models.KOSyncProgress(user_id=env.users[0].id, document=str(BOOK_ID), progress="3",
-                                              percentage=5.0, device="CWA Web Reader", device_id="web",
-                                              timestamp=datetime(2022, 1, 1, tzinfo=timezone.utc)))
-    env.session.commit()
+    _koreader_record(env, "further", when=2021, percentage=40.0)
+    _web_record(env, 2022, 5.0)
 
     with env.app.test_request_context():
         config = env.kosync.reader_progress_config(BOOK_ID, "epub")
-        assert [c["document"] for c in config["candidates"]] == ["kindlehash"]
+        assert [c["document"] for c in config["candidates"]] == ["kindlehash", "further"]
         assert config["candidates"][0]["percentage"] == pytest.approx(0.1188)
         assert config["linkUrl"] == _url() + "/link"
         assert config["format"] == "EPUB"
@@ -275,3 +281,17 @@ def test_linking_attaches_the_koreader_hash_so_progress_is_shared(linking):
     assert env.client.get(_url()).get_json()["progress"] == "/body/DocFragment[6]/body/p[18]/text().477"
     with env.app.test_request_context():
         assert env.kosync.reader_progress_config(BOOK_ID, "epub")["candidates"] == []
+
+
+def test_linking_supersedes_a_newer_web_reader_save_made_on_opening(linking):
+    """Production case: the book was opened (0.13%) after reading on a Kindle with an OPDS-downloaded copy."""
+    env = linking
+    _koreader_record(env, "kindlehash", when=2025)
+    _web_record(env, 2026, 0.13)
+    with env.app.test_request_context():
+        assert [c["document"] for c in env.kosync.reader_progress_config(BOOK_ID, "epub")["candidates"]] == \
+            ["kindlehash"]
+
+    assert env.client.post(_url() + "/link", json={"document": "kindlehash", "format": "EPUB"}).status_code == 200
+    state = env.client.get(_url()).get_json()
+    assert (state["device"], state["percentage"]) == ("KindleOasis2", pytest.approx(0.1188))

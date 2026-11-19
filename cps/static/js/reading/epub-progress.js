@@ -156,6 +156,19 @@
         return indexing;
     }
 
+    /** Share of the book before and after `section`, weighted by document size when the server provides it. */
+    function sectionSpan(section, linear) {
+        const sizes = calibre.epubData && Array.isArray(calibre.epubData.sections) ? calibre.epubData.sections : [];
+        const total = sizes.reduce((sum, item) => sum + item.size, 0);
+        const at = sizes.findIndex(item => item.index === section.index);
+        if (total > 0 && at >= 0) {
+            const start = sizes.slice(0, at).reduce((sum, item) => sum + item.size, 0);
+            return [start / total, (start + sizes[at].size) / total];
+        }
+        const index = Math.max(0, linear.indexOf(section));
+        return [index / Math.max(1, linear.length), (index + 1) / Math.max(1, linear.length)];
+    }
+
     /** First unmatched KOReader position (newest first) that points to real content in this book. */
     async function matchingCandidate(candidates) {
         const sync = window.CwaProgressSync;
@@ -165,8 +178,8 @@
             const section = parsed && book.spine.get(parsed.fragment);
             if (!section || !parsed.steps.length) continue;
             // A position deep in another book can resolve here by coincidence; its percentage would not fit.
-            const position = Math.max(0, linear.indexOf(section)) / Math.max(1, linear.length);
-            if (Math.abs(position - candidate.percentage) > 0.2) continue;
+            const [start, end] = sectionSpan(section, linear);
+            if (candidate.percentage < start - 0.2 || candidate.percentage > end + 0.2) continue;
             try {
                 const doc = await book.load(section.url);
                 const body = doc && (doc.body || doc.getElementsByTagName("body")[0]);

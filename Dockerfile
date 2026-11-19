@@ -27,6 +27,8 @@ ARG INSTALL_KEPUBIFY=true
 # Space-separated requirements.txt package names to skip, for slimmer images
 # that don't need some optional integrations (all are import-guarded in cps/).
 ARG PIP_EXCLUDE=""
+# Optional Ubuntu archive mirror (e.g. http://azure.archive.ubuntu.com/ubuntu/ on Azure-hosted CI runners).
+ARG UBUNTU_MIRROR=""
 
 FROM ghcr.io/linuxserver/baseimage-ubuntu:noble AS dependencies
 
@@ -34,6 +36,7 @@ ARG CALIBRE_RELEASE
 ARG KEPUBIFY_RELEASE
 ARG INSTALL_KEPUBIFY
 ARG PIP_EXCLUDE
+ARG UBUNTU_MIRROR
 
 # Set the default shell for the following RUN instructions to bash instead of sh
 SHELL ["/bin/bash", "-c"]
@@ -42,6 +45,10 @@ SHELL ["/bin/bash", "-c"]
 RUN \
   # The deadsnakes PPA (Launchpad) intermittently returns 503: retry downloads
   echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries && \
+  if [ -n "${UBUNTU_MIRROR}" ]; then \
+    sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?#${UBUNTU_MIRROR}#g" \
+      $(ls /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null); \
+  fi && \
   # STEP 1.1 - Add deadsnakes PPA for Python 3.13 and install required apt packages
   echo "**** add deadsnakes PPA for Python 3.13 ****" && \
   apt-get update && \
@@ -194,6 +201,7 @@ ARG CALIBRE_RELEASE
 ARG KEPUBIFY_RELEASE
 ARG INSTALL_KEPUBIFY
 ARG PIP_EXCLUDE
+ARG UBUNTU_MIRROR
 
 LABEL build_version="Version:- ${VERSION}"
 LABEL build_date="${BUILD_DATE}"
@@ -213,6 +221,10 @@ COPY --from=dependencies /usr/bin/lsof /usr/bin/lsof
 # Install only runtime packages (no build tools)
 RUN \
   echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries && \
+  if [ -n "${UBUNTU_MIRROR}" ]; then \
+    sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu/?#${UBUNTU_MIRROR}#g" \
+      $(ls /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null); \
+  fi && \
   echo "**** add deadsnakes PPA for Python 3.13 runtime ****" && \
   apt-get update && \
   apt-get install -y --no-install-recommends software-properties-common && \

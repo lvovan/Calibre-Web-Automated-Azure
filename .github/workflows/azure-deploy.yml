@@ -76,6 +76,7 @@ jobs:
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
             VERSION=${{ steps.meta.outputs.version }}
             INSTALL_KEPUBIFY=false
+            UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu/
             PIP_EXCLUDE=google-api-python-client PyDrive2 oauth2client google-auth-oauthlib goodreads python-Levenshtein python-ldap Flask-SimpleLDAP scholarly
           cache-from: type=gha
           cache-to: type=gha,mode=max

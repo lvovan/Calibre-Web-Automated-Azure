@@ -92,12 +92,13 @@ On App Service (`WEBSITE_SITE_NAME` is set), `cwa-init` refuses to start if `/ca
 
 ### Slimmer image
 
-The `azure-deploy.yml` workflow sets two Dockerfile build arguments to leave out features this deployment doesn't use. Both default to the full upstream image, so other builds are unchanged.
+The `azure-deploy.yml` workflow sets these Dockerfile build arguments. All default to the upstream behavior, so other builds are unchanged.
 
 | Build argument | Value in `azure-deploy.yml` | Effect |
 |---|---|---|
 | `INSTALL_KEPUBIFY` | `false` | No kepubify. KEPUB conversion is unavailable, and Kobo sync sends plain EPUB instead of KEPUB. |
 | `PIP_EXCLUDE` | `google-api-python-client PyDrive2 oauth2client google-auth-oauthlib goodreads python-Levenshtein python-ldap Flask-SimpleLDAP scholarly` | Drops the Google Drive library, Gmail sending, Goodreads, LDAP login and the Google Scholar metadata source. |
+| `UBUNTU_MIRROR` | `http://azure.archive.ubuntu.com/ubuntu/` | Installs Ubuntu packages from Azure's mirror (GitHub runners are on Azure) instead of `archive.ubuntu.com`, which has outages. |
 
 The packages in `PIP_EXCLUDE` are moved to `optional-requirements.txt` inside the image. The startup dependency check treats them as optional, so it doesn't stop the app. To get a feature back, remove its package from `PIP_EXCLUDE` (or set `INSTALL_KEPUBIFY=true`) and push.
 

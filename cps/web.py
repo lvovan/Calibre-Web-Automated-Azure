@@ -5,6 +5,7 @@
 # See CONTRIBUTORS for full list of authors.
 
 import os
+import hashlib
 import json
 import mimetypes
 import chardet  # dependency of requests
@@ -46,6 +47,7 @@ from .usermanagement import login_required_if_no_ano
 from .kobo_sync_status import remove_synced_book
 from . import magic_shelf
 from . import comic_pages as comic_archive
+from . import epub_resources
 from .render_template import render_title_template
 from .kobo_sync_status import change_archived_books
 from . import limiter
@@ -133,6 +135,10 @@ def add_security_headers(resp):
         csp += " blob: ; style-src-elem 'self' blob: 'unsafe-inline'"
     csp += "; object-src 'none';"
     resp.headers['Content-Security-Policy'] = csp
+    if request.endpoint == "web.epub_resource":
+        resp.headers['Content-Security-Policy'] = (
+            "default-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
+            "font-src 'self' data:; media-src 'self'; sandbox allow-same-origin")
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     resp.headers['X-Frame-Options'] = 'SAMEORIGIN'
     resp.headers['X-XSS-Protection'] = '1; mode=block'
@@ -1956,6 +1962,45 @@ def serve_book(book_id, book_format, anyname):
 COMIC_PAGE_FORMATS = ("cbz", "cbt", "cbr")
 
 
+def _epub_path(book_id, book_format):
+    if book_format.lower() not in ("epub", "kepub") or config.config_use_google_drive:
+        return None
+    book = calibre_db.get_filtered_book(book_id)
+    data = calibre_db.get_book_format(book_id, book_format.upper()) if book else None
+    if not data:
+        return None
+    path = os.path.join(config.get_book_path(), book.path, data.name + "." + book_format.lower())
+    return path if os.path.isfile(path) else None
+
+
+@web.route("/epub/<int:book_id>/<book_format>/<version>/<path:resource>")
+@login_required_if_no_ano
+@viewer_required
+def epub_resource(book_id, book_format, version, resource):
+    path = _epub_path(book_id, book_format)
+    if not path:
+        abort(404)
+    try:
+        metadata = epub_resources.describe(path)
+        if version != metadata["revision"] or resource not in metadata["resources"]:
+            abort(404)
+        etag = hashlib.sha256((version + resource).encode("utf-8")).hexdigest()
+        if request.if_none_match.contains(etag):
+            response = make_response("", 304)
+        else:
+            content, mime = epub_resources.read_resource(path, version, resource)
+            response = make_response(content)
+            response.mimetype = mime
+    except KeyError:
+        abort(404)
+    except (epub_resources.EpubResourceError, OSError) as ex:
+        log.warning("EPUB reader cannot read resource %s of book %s: %s", resource, book_id, ex)
+        abort(422)
+    response.set_etag(etag)
+    response.headers["Cache-Control"] = "private, no-cache"
+    return response
+
+
 def _comic_archive_path(book_id, book_format):
     """Returns the local path of a comic archive the current user may read, or None."""
     book_format = book_format.lower()
@@ -2884,6 +2929,8 @@ def read_book(book_id, book_format):
                 kosync_progress = kobo_state.current_bookmark.progress_percent
         except Exception as e:
             log.debug(f"Failed to load KOReader progress for book {book_id}: {e}")
+    from .progress_syncing.protocols.kosync import reader_progress_config
+    progress_sync = reader_progress_config(book_id)
     # Track read activity
     if current_user.is_authenticated:
         try:
@@ -2919,15 +2966,31 @@ def read_book(book_id, book_format):
     
     if book_format.lower() in ("epub", "kepub"):
         log.debug("Start epub reader for %d (%s)", book_id, book_format.lower())
+        epub_data = None
+        path = _epub_path(book_id, book_format)
+        if path:
+            try:
+                metadata = epub_resources.describe(path)
+                epub_data = {key: value for key, value in metadata.items() if key != "resources"}
+                epub_data["baseUrl"] = url_for("web.epub_resource", book_id=book_id,
+                                               book_format=book_format.lower(),
+                                               version=metadata["revision"], resource="_")[:-1]
+            except (epub_resources.EpubResourceError, OSError) as ex:
+                log.warning("EPUB reader cannot open book %s: %s", book_id, ex)
+                flash(_("Unable to open this EPUB. The publication may be damaged or encrypted."), category="error")
+                return redirect(url_for("web.show_book", book_id=book_id))
         return render_title_template('read.html', bookid=book_id, title=book.title,
                                      bookmark=bookmark, kosync_progress=kosync_progress,
+                                     epub_data=epub_data, progress_sync=progress_sync,
                                      book_format=book_format.lower())
     elif book_format.lower() == "pdf":
         log.debug("Start pdf reader for %d", book_id)
-        return render_title_template('readpdf.html', pdffile=book_id, title=book.title)
+        return render_title_template('readpdf.html', pdffile=book_id, title=book.title,
+                                     progress_sync=progress_sync)
     elif book_format.lower() == "txt":
         log.debug("Start txt reader for %d", book_id)
-        return render_title_template('readtxt.html', txtfile=book_id, title=book.title)
+        return render_title_template('readtxt.html', txtfile=book_id, title=book.title,
+                                     progress_sync=progress_sync)
     elif book_format.lower() in ["djvu", "djv"]:
         log.debug("Start djvu reader for %d", book_id)
         return render_title_template('readdjvu.html', djvufile=book_id, title=book.title,
@@ -2949,7 +3012,8 @@ def read_book(book_id, book_format):
                         title = title + " #" + '{0:.2f}'.format(book.series_index).rstrip('0').rstrip('.')
                 log.debug("Start comic reader for %d", book_id)
                 return render_title_template('readcbr.html', comicfile=all_name, title=title,
-                                             extension=fileExt, bookmark=bookmark)
+                                             extension=fileExt, bookmark=bookmark,
+                                             progress_sync=progress_sync)
         log.debug("Selected book is unavailable. File does not exist or is not accessible")
         flash(_("Oops! Selected book is unavailable. File does not exist or is not accessible"),
               category="error")

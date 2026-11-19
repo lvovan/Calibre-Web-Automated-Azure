@@ -62,7 +62,7 @@ def env(monkeypatch):
     cps.services = services
     cps.csrf = types.SimpleNamespace(exempt=lambda f: f)
     cps.config = types.SimpleNamespace(config_allow_reverse_proxy_header_login=False, config_login_type=0)
-    cps.usermanagement = types.SimpleNamespace()
+    cps.usermanagement = types.SimpleNamespace(user_login_required=lambda f: f)
 
     import cps.ub as ub
     from cps.progress_syncing.protocols import kosync

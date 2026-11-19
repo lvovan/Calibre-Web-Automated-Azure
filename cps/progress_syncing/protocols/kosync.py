@@ -494,6 +494,76 @@ def get_progress_record(user_id, document_checksum, book_id) -> KOSyncProgress:
     return progress_record
 
 
+def store_progress(user, progress_record, document, book_id, book_title, progress, percentage_float,
+                   device, device_id, timestamp, push_hardcover=True) -> KOSyncProgress:
+    """
+    Save a progress record, then update ReadBook/Kobo state and Hardcover for a matched book.
+
+    Shared by KOReader devices and the web readers so both keep one record per user and book.
+    Raises KOSyncError when the progress itself cannot be committed.
+    """
+    # Prefer the book_id as the identifier (if we have it) to ensure that all documents associated with the same
+    # Calibre book share the same progress record even if they have different checksums.
+    document = book_id or document
+
+    if progress_record:
+        progress_record.progress = progress
+        progress_record.percentage = percentage_float
+        progress_record.device = device
+        progress_record.device_id = device_id
+        progress_record.timestamp = timestamp
+        log.debug(f"Updated kosync progress for user {user.id}, document {document}")
+    else:
+        progress_record = KOSyncProgress(
+            user_id=user.id,
+            document=str(document),
+            progress=progress,
+            percentage=percentage_float,
+            device=device,
+            device_id=device_id,
+            timestamp=timestamp
+        )
+        ub.session.add(progress_record)
+        log.debug(f"Created kosync progress for user {user.id}, document {document}")
+
+    # CRITICAL: Always commit kosync_progress first before attempting ReadBook updates
+    # This ensures sync location is persisted even if ReadBook update fails
+    try:
+        ub.session.commit()
+        log.info(f"Saved kosync progress: user={user.id}, document={document}, "
+                 f"progress={percentage_float:.2f}%")
+    except SQLAlchemyError as e:
+        log.error(f"Failed to commit kosync_progress: {e}")
+        ub.session.rollback()
+        raise KOSyncError(ERROR_INTERNAL, "Failed to save sync progress")
+
+    # Update user's ReadBook status if we matched a book
+    # This is done AFTER kosync_progress is committed, so sync location is always safe
+    if book_id:
+        try:
+            update_book_read_status(user, book_id, percentage_float)
+            ub.session.commit()
+            log.info(f"Updated ReadBook status: user={user.id}, book={book_id} "
+                     f"({book_title}), status based on {percentage_float:.1f}%")
+
+            if push_hardcover:
+                from ... import calibre_db
+                book = calibre_db.get_book(book_id)
+                log.debug(f"Going to sync book {book_id} to Hardcover.")
+                push_reading_state_to_hardcover(user, book, int(percentage_float))
+
+        except SQLAlchemyError as e:
+            log.error(f"Failed to update ReadBook status for book {book_id}: {e}")
+            # Rollback only affects the failed ReadBook update
+            # kosync_progress was already committed and is safe
+            ub.session.rollback()
+        except Exception as e:
+            log.error(f"Unexpected error updating ReadBook status for book {book_id}: {e}")
+            ub.session.rollback()
+
+    return progress_record
+
+
 ################################################################################
 # API Endpoints
 ################################################################################
@@ -755,73 +825,9 @@ def update_progress():
             response_data, document
         )
 
-        # Check if progress record exists
         progress_record = get_progress_record(user.id, document, book_id)
-
-        # Prefer the book_id as the identifier (if we have it) to ensure that all documents associated with the same
-        # Calibre book share the same progress record even if they have different checksums.
-        document = book_id or document
-
-        if progress_record:
-            # Update existing record
-            progress_record.progress = progress
-            progress_record.percentage = percentage_float
-            progress_record.device = device
-            progress_record.device_id = device_id
-            progress_record.timestamp = timestamp
-            log.debug(f"Updated kosync progress for user {user.id}, document {document}")
-        else:
-            # Create new record
-            progress_record = KOSyncProgress(
-                user_id=user.id,
-                document=document,
-                progress=progress,
-                percentage=percentage_float,
-                device=device,
-                device_id=device_id,
-                timestamp=timestamp
-            )
-            ub.session.add(progress_record)
-            log.debug(f"Created kosync progress for user {user.id}, document {document}")
-
-        # CRITICAL: Always commit kosync_progress first before attempting ReadBook updates
-        # This ensures sync location is persisted even if ReadBook update fails
-        try:
-            ub.session.commit()
-            log.info(f"Saved kosync progress: user={user.id}, document={document}, "
-                    f"progress={percentage_float:.2f}%")
-        except SQLAlchemyError as e:
-            log.error(f"Failed to commit kosync_progress: {e}")
-            ub.session.rollback()
-            raise KOSyncError(ERROR_INTERNAL, "Failed to save sync progress")
-
-        # Update user's ReadBook status if we matched a book
-        # This is done AFTER kosync_progress is committed, so sync location is always safe
-        if book_id:
-            try:
-                update_book_read_status(user, book_id, percentage_float)
-                ub.session.commit()
-                log.info(f"Updated ReadBook status: user={user.id}, book={book_id} "
-                        f"({book_title}), status based on {percentage_float:.1f}%")
-
-                # Push to Hardcover
-                from ... import calibre_db
-                book = calibre_db.get_book(book_id)
-
-                if user is not None:
-                    log.debug(f"Going to sync book {book_id} to Hardcover.")
-                    push_reading_state_to_hardcover(user, book, int(percentage_float))
-                else:
-                    log.debug(f"Book {book_id} not syncing to Hardcover, no matched user.")
-
-            except SQLAlchemyError as e:
-                log.error(f"Failed to update ReadBook status for book {book_id}: {e}")
-                # Rollback only affects the failed ReadBook update
-                # kosync_progress was already committed and is safe
-                ub.session.rollback()
-            except Exception as e:
-                log.error(f"Unexpected error updating ReadBook status for book {book_id}: {e}")
-                ub.session.rollback()
+        store_progress(user, progress_record, document, book_id, book_title, progress,
+                       percentage_float, device, device_id, timestamp)
 
         log.debug(endpoint + f" Response: {response_data}")
 
@@ -837,6 +843,124 @@ def update_progress():
         log.error(f"update_progress: Unexpected error: {str(e)}")
         ub.session.rollback()
         return handle_sync_error(KOSyncError(ERROR_INTERNAL, "Internal server error"))
+
+
+################################################################################
+# Web reader progress (browser session authentication)
+################################################################################
+
+WEB_DEVICE_NAME = "CWA Web Reader"
+
+
+def _web_progress_record(user_id: int, book_id: int) -> KOSyncProgress | None:
+    """Latest progress for a book, whether KOReader stored it by book id or by an unmatched checksum."""
+    from ... import calibre_db
+    from ...db import BookFormatChecksum
+
+    documents = [str(book_id)]
+    try:
+        documents += [row[0] for row in calibre_db.session.query(BookFormatChecksum.checksum)
+                      .filter(BookFormatChecksum.book == book_id).all()]
+    except SQLAlchemyError as e:
+        log.warning(f"Could not read checksums for book {book_id}: {e}")
+    return ub.session.query(KOSyncProgress).filter(
+        KOSyncProgress.user_id == user_id,
+        KOSyncProgress.document.in_(documents)
+    ).order_by(desc(KOSyncProgress.timestamp)).first()
+
+
+def _serialize_web_progress(record: KOSyncProgress | None) -> dict[str, Any] | None:
+    if not record:
+        return None
+    stamp = record.timestamp
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return {
+        "progress": record.progress,
+        "percentage": max(0.0, min(1.0, record.percentage / 100.0)),
+        "device": record.device,
+        "device_id": record.device_id,
+        "timestamp": stamp.timestamp(),
+    }
+
+
+def reader_progress_config(book_id: int) -> dict[str, Any] | None:
+    """Progress sync settings embedded in the web reader pages, or None when sync is unavailable."""
+    from flask import url_for
+
+    from ...cw_login import current_user
+
+    if not current_user.is_authenticated or current_user.is_anonymous or not is_koreader_sync_enabled():
+        return None
+    try:
+        state = _serialize_web_progress(_web_progress_record(int(current_user.id), book_id))
+    except SQLAlchemyError as e:
+        log.warning(f"Could not load reading progress for book {book_id}: {e}")
+        state = None
+    return {
+        "url": url_for("kosync.reader_progress", book_id=book_id),
+        "state": state,
+        "device": WEB_DEVICE_NAME,
+        "messages": {
+            "remote": _("Continue from %(percent)s on %(device)s?", percent="{percent}", device="{device}"),
+            "jump": _("Continue"),
+            "dismiss": _("Dismiss"),
+            "error": _("Reading progress could not be synchronized."),
+        },
+    }
+
+
+@kosync.route("/kosync/reader/<int:book_id>", methods=["GET", "PUT"])
+@usermanagement.user_login_required
+def reader_progress(book_id: int):
+    """Reading progress for the signed-in user's web readers, stored with KOReader progress.
+
+    Uses the browser session (and CSRF token for PUT) instead of device credentials. Positions
+    use KOReader's format (XPointer for EPUB, 1-based page for PDF/comics) so devices can resume.
+    """
+    from ... import calibre_db
+    from ...cw_login import current_user
+
+    if not is_koreader_sync_enabled():
+        return jsonify({"message": "Reading progress sync is disabled"}), 404
+    book = calibre_db.get_filtered_book(book_id)
+    if not book:
+        return jsonify({"message": "Book not found"}), 404
+    user = current_user
+
+    try:
+        record = _web_progress_record(int(user.id), book_id)
+        if request.method == "GET":
+            return jsonify(_serialize_web_progress(record) or {})
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"message": "Invalid request data"}), 400
+        progress = data.get("progress")
+        percentage = data.get("percentage")
+        device = data.get("device") or WEB_DEVICE_NAME
+        device_id = data.get("device_id")
+        if not is_valid_field(progress) or len(progress) > MAX_PROGRESS_LENGTH:
+            return jsonify({"message": "Invalid progress field"}), 400
+        if not is_valid_field(device) or len(device) > MAX_DEVICE_LENGTH:
+            return jsonify({"message": "Invalid device field"}), 400
+        if device_id is not None and (not is_valid_field(device_id) or len(device_id) > MAX_DEVICE_ID_LENGTH):
+            return jsonify({"message": "Invalid device_id field"}), 400
+        # Web readers always send a fraction, so 1.0 is unambiguous here.
+        if isinstance(percentage, bool) or not isinstance(percentage, (int, float)) or not 0 <= percentage <= 1:
+            return jsonify({"message": "Invalid percentage value"}), 400
+
+        percentage_float = float(percentage) * 100.0
+        push_hardcover = record is None or int(record.percentage) != int(percentage_float)
+        record = store_progress(user, record, str(book_id), book_id, book.title, progress, percentage_float,
+                                device, device_id, datetime.now(timezone.utc), push_hardcover=push_hardcover)
+        return jsonify(_serialize_web_progress(record))
+    except KOSyncError as e:
+        return jsonify({"message": e.message}), 500
+    except SQLAlchemyError as e:
+        log.error(f"reader_progress: Database error for book {book_id}: {e}")
+        ub.session.rollback()
+        return jsonify({"message": "Database error"}), 500
 
 
 ################################################################################

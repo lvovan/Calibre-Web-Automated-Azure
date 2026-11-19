@@ -23,6 +23,7 @@ $(document).ready(function() {
     $("#content").load($("#readmain").data('load'), function(textStr) {
         $(this).height($(this).parent().height()*0.95);
         $(this).text(textStr);
+        restoreProgress();
     });
     //keybind
     $(document).keydown(function(event){
@@ -67,6 +68,8 @@ $(document).ready(function() {
     //page animate
     var origwidth = $("#content")[0].getBoundingClientRect().width;
     var gap = 20;
+    var baseLeft = $("#content").offset().left;
+    var leftoff;
     function prevPage() {
         if($("#content").offset().left > 0) {
             return;
@@ -74,6 +77,7 @@ $(document).ready(function() {
         leftoff = $("#content").offset().left;
         leftoff = leftoff+origwidth+gap;
         $("#content").offset({left:leftoff});
+        saveProgress();
     }
     function nextPage() {
         leftoff = $("#content").offset().left;
@@ -82,5 +86,40 @@ $(document).ready(function() {
             return;
         }
         $("#content").offset({left:leftoff});
+        saveProgress();
+    }
+
+    // Per-user progress shared across devices. KOReader cannot map web TXT pages, so only the
+    // percentage is meaningful to other devices; "cwa-txt:<fraction>" keeps the exact web position.
+    var settings = window.cwaTxt || {};
+    var sync = window.CwaProgressSync ? window.CwaProgressSync.create(settings.progressSync, {
+        csrfToken: settings.csrfToken,
+        onRemote: function(state) { goToFraction(fractionFor(state)); }
+    }) : null;
+    function pageCount() {
+        return Math.max(1, Math.ceil($("#content")[0].scrollWidth / (origwidth + gap)));
+    }
+    function currentPage() {
+        return Math.max(0, Math.round((baseLeft - $("#content").offset().left) / (origwidth + gap)));
+    }
+    function goToFraction(fraction) {
+        if (fraction === null) return;
+        var page = Math.min(pageCount() - 1, Math.max(0, Math.floor(fraction * pageCount())));
+        $("#content").offset({left: baseLeft - page * (origwidth + gap)});
+    }
+    function fractionFor(state) {
+        if (!state) return null;
+        var match = /^cwa-txt:([0-9.]+)$/.exec(state.progress || "");
+        var fraction = match ? parseFloat(match[1]) : state.percentage;
+        return typeof fraction === "number" && isFinite(fraction) && fraction > 0 ? Math.min(1, fraction) : null;
+    }
+    function restoreProgress() {
+        if (sync) goToFraction(fractionFor(sync.state));
+    }
+    function saveProgress() {
+        if (!sync) return;
+        var fraction = currentPage() / pageCount();
+        var end = (currentPage() + 1) / pageCount();
+        sync.save("cwa-txt:" + fraction.toFixed(6), end);
     }
 });

@@ -22,9 +22,11 @@
       bookmark: {{ (bookmark.bookmark_key if bookmark else '')|tojson }},
       useBookmarks: {{ current_user.is_authenticated|tojson }},
       csrfToken: {{ csrf_token()|tojson }},
+      progressSync: {{ progress_sync|tojson }},
       staticBase: {{ url_for('static', filename='kthoom/')|tojson }}
     };
   </script>
+  <script src="{{ url_for('static', filename='js/reading/progress-sync.js') }}"></script>
   <script type="module" src="{{ url_for('static', filename='kthoom/cwa-main.js') }}"></script>
 </head>
 

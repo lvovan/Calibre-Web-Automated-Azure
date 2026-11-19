@@ -60,3 +60,49 @@
     font-size: 16px;
     text-align: center;
 }
+
+#reader-status {
+    position: fixed;
+    bottom: 30px;
+    left: 10%;
+    right: 10%;
+    text-align: center;
+    z-index: 20;
+}
+
+.epub-manga .text-settings {
+    display: none;
+}
+
+#manga-controls[hidden] {
+    display: none;
+}
+
+#viewer.manga-viewer {
+    overflow: auto;
+    touch-action: pan-x pan-y pinch-zoom;
+}
+
+.manga-stage {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    gap: 0;
+}
+
+.manga-stage img {
+    display: block;
+    object-fit: contain;
+    max-height: 100%;
+    max-width: 100%;
+    min-width: 0;
+    flex: 1 1 0;
+    height: 100%;
+}
+
+.arrow.disabled {
+    opacity: 0.3;
+    pointer-events: none;
+}

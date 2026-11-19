@@ -44,6 +44,15 @@ pytest tests/docker/ -v
 # IMPORTANT: Do NOT use -n flag with Docker tests!
 ```
 
+### Web Reader Tests (No Docker)
+
+```bash
+pytest tests/unit/test_epub_resources.py tests/unit/test_kosync_web_reader.py
+node --test tests/unit/test_epub_reader.js tests/unit/test_progress_sync.js
+```
+
+The JavaScript tests use Node's built-in test runner (Node 18 or newer); no npm packages are needed.
+
 ### Skip Docker Tests
 ```bash
 pytest -m "not docker_integration" -n auto -v

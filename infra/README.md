@@ -29,6 +29,32 @@ Books are added through the **web UI upload** button; the ingest folder isn't ex
 
 At startup, the `init-cwa-persistent-config` s6 service runs before the base image initialization. On App Service with `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true`, it creates `/home/config`, seeds it from the image on first start, and replaces `/config` with a symlink to it. Elsewhere it does nothing, so bind-mounting `/config` works as usual. `/home` counts toward the plan's storage quota (10 GB on B1), shared with the plan's other apps; `/config` typically stays well under 1 GB.
 
+### Large EPUBs and manga
+
+The EPUB reader serves local EPUB/KEPUB files one resource at a time through authenticated,
+revisioned URLs. It does not download the whole archive or extract it onto persistent storage.
+Each request rechecks library visibility and viewer permissions; cached resources require revalidation.
+Individual resources are limited to 64 MiB. Google Drive books retain the archive-based loading path.
+
+Reader settings offer **Auto / Text / Manga**, saved per user and book. Auto samples the reading
+order, not the title or archive size. Simple, unstyled single-image pages use a bounded image renderer
+with zoom, optional spreads and RTL navigation; styled pages, SVG, captions and mixed content retain
+the EPUB engine and original markup. Manga uses section/page progress without text indexing. Novels
+keep the text renderer and text-based percentages, with one revision-aware location index and exact
+CFI position restoration. Existing bookmarks and percentage-based progress can still be restored.
+
+### Reading progress across devices
+
+When **KOReader sync** is enabled in the admin settings, the web readers for EPUB/KEPUB, comics
+(CBZ/CBR/CBT), PDF and TXT share each signed-in user's position through the built-in kosync server,
+in the same per-user record KOReader devices use. Each user has their own position per book.
+Books open at the most recently saved position from any device; if another device moves ahead while a
+book is open, the reader offers to jump there. Positions use KOReader's formats (an XPointer for
+EPUB, a page number for PDFs and comics), so web readers and KOReader devices resume each other's
+pages. Limitations: TXT exchanges only the percentage with devices; DJVU and anonymous browsing are not
+synchronized; one position is kept per book across all of its formats. With KOReader sync disabled,
+the readers keep their previous browser-local behavior.
+
 ### Azure-specific settings (set by Bicep)
 
 | App setting | Value | Why |

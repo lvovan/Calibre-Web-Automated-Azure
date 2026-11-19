@@ -22,6 +22,10 @@
         <script>
             "use strict";
         </script>
+        <script>
+            window.cwaTxt = {progressSync: {{ progress_sync|tojson }}, csrfToken: {{ csrf_token()|tojson }}};
+        </script>
+        <script src="{{ url_for('static', filename='js/reading/progress-sync.js') }}"></script>
         <script src="{{ url_for('static', filename='js/reading/txt_reader.js') }}"></script>
     </head>
     <body>

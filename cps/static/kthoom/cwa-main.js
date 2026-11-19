@@ -35,8 +35,44 @@ Params.doNotPromptOnClose = 'true';
 const app = new KthoomApp();
 window.kthoom.getApp = () => app;
 
+// Per-user progress shared with KOReader devices (1-based page numbers), when sync is enabled.
+const sync = window.CwaProgressSync ? window.CwaProgressSync.create(cfg.progressSync, {
+  csrfToken: cfg.csrfToken,
+  onRemote: (state) => {
+    const book = app.readingStack_.getCurrentBook();
+    const page = book ? pageFromProgress(state, book.getNumberOfPages()) : -1;
+    if (page >= 0 && book.getNumberOfPagesReady() > page) showSyncedPage(page);
+  },
+}) : null;
+
+/** 0-based page shown by a restore or synchronized jump; its page change is not saved as new progress. */
+let jumpPage = -1;
+function showSyncedPage(page) {
+  if (page !== app.bookViewer_.lastNotifiedPageNum_) jumpPage = page;
+  app.bookViewer_.showPage(page);
+}
+
+/**
+ * @param {object} state Server progress.
+ * @param {number} total Number of pages in the book.
+ * @returns {number} The 0-based page for a synchronized position, or -1.
+ */
+function pageFromProgress(state, total) {
+  if (!state || !total) return -1;
+  const page = window.CwaProgressSync.parsePage(state.progress);
+  if (page !== null && page >= 1 && page <= total) return page - 1;
+  if (typeof state.percentage === 'number' && state.percentage > 0) {
+    return Math.min(total - 1, Math.max(0, Math.round(state.percentage * total) - 1));
+  }
+  return -1;
+}
+
 /** @returns {number} The saved 0-based page, or -1. */
-function savedPage() {
+function savedPage(book) {
+  if (sync && sync.state) {
+    const page = pageFromProgress(sync.state, book.getNumberOfPages());
+    if (page >= 0) return page;
+  }
   if (!cfg.useBookmarks) return -1;
   const n = parseInt(cfg.bookmark, 10);
   return Number.isInteger(n) && n >= 0 ? n : -1;
@@ -45,7 +81,11 @@ function savedPage() {
 let bookmarksEnabled = false;
 let bookmarkTimer = null;
 function saveBookmark(pageNum) {
-  if (!bookmarksEnabled || !cfg.useBookmarks) return;
+  if (!bookmarksEnabled) return;
+  const book = app.readingStack_.getCurrentBook();
+  const total = book ? book.getNumberOfPages() : 0;
+  if (sync && total > 0) sync.save(String(pageNum + 1), (pageNum + 1) / total);
+  if (!cfg.useBookmarks) return;
   clearTimeout(bookmarkTimer);
   bookmarkTimer = setTimeout(() => {
     const body = new URLSearchParams({ csrf_token: cfg.csrfToken, bookmark: String(pageNum) });
@@ -74,18 +114,25 @@ function prefetch(pageNum, numPagesInViewer) {
 
 window.addEventListener('kthoom-pagechange', (evt) => {
   const { pageNum, numPagesInViewer } = evt.detail;
-  saveBookmark(pageNum);
+  const programmatic = jumpPage >= 0 && pageNum === jumpPage;
+  jumpPage = -1;
+  if (!programmatic) saveBookmark(pageNum);
   prefetch(pageNum, numPagesInViewer);
 });
 
 /** Restores the bookmark once the page exists, then starts saving bookmarks. */
 function restoreBookmark(book) {
-  const target = savedPage();
   const done = () => { bookmarksEnabled = true; };
-  if (target <= 0) { done(); return; }
+  let target = -1;
   const tryShow = () => {
-    if (book.getNumberOfPagesReady() > target) {
-      app.bookViewer_.showPage(target);
+    // The page count is only known once the archive has been listed or unpacked.
+    if (target < 0) target = book.getNumberOfPages() > 0 || !sync ? savedPage(book) : -1;
+    if (target === 0 || (target < 0 && book.getNumberOfPages() > 0)) {
+      done();
+      return true;
+    }
+    if (target > 0 && book.getNumberOfPagesReady() > target) {
+      showSyncedPage(target);
       done();
       return true;
     }

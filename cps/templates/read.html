@@ -6,7 +6,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
     <title>{{_('epub Reader')}} | {{title}}</title>
     <meta name="description" content="">
-    <meta name="viewport" content="width=device-width, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="mobile-web-app-capable" content="yes">
     {% if g.google_site_verification|length > 0 %}
     <meta name="google-site-verification" content="{{g.google_site_verification}}">
@@ -72,11 +72,24 @@
 	    <div id="viewer"></div>
 	    <div id="next" class="arrow">›</div>
 	    <div id="progress">0%</div>
+	    <div id="reader-status" role="status" aria-live="polite"></div>
 	    <div id="loader"><img src="{{ url_for('static', filename='img/loader.gif') }}"></div>
 	</div>
     <div class="modal md-effect-1" id="settings-modal">
         <div class="md-content">
             <h3>{{_('Settings')}}</h3>
+            <div class="form-group">
+                <label for="reader-mode">{{_('Reading mode (this book)')}}</label>
+                <select id="reader-mode">
+                    <option value="auto">{{_('Auto')}}</option>
+                    <option value="text">{{_('Text')}}</option>
+                    <option value="manga">{{_('Manga')}}</option>
+                </select>
+            </div>
+            <div class="form-group" id="manga-controls" hidden>
+                <label for="manga-zoom">{{_('Image zoom')}}</label>
+                <input id="manga-zoom" type="range" min="1" max="3" value="1" step="0.25">
+            </div>
             <div class="form-group themes" id="themes">
                 Choose a theme below: <br />
 
@@ -90,19 +103,19 @@
                 <button type="button" id="blackTheme" class="blackTheme" onclick="selectTheme(this.id)"><span
                         id="blackSelected"> </span>{{_('Black')}}</button>
             </div>
-            <div class="form-group">
+            <div class="form-group text-settings">
                 <p>
                     <input type="checkbox" id="sidebarReflow"
                         name="sidebarReflow">{{_('Reflow text when sidebars are open.')}}
                 </p>
             </div>
-            <div class="form-group fontSizeWrapper">
+            <div class="form-group fontSizeWrapper text-settings">
                 <div class="slider">
                     <label for="fader">{{ _('Font Sizes') }}</label>
                     <input type="range" min="75" max="200" value="100" id="fontSizeFader" step="25">
                 </div>            
             </div>
-              <div class="font" id="font">
+              <div class="font text-settings" id="font">
                 <label class="item">{{_('Font')}}:</label>
                 <button type="button" id="default" onclick="selectFont(this.id)"><span>✓</span>{{_('Default')}}</button> 
                 <button type="button" id="Yahei" onclick="selectFont(this.id)"><span></span>{{_('Yahei')}}</button>
@@ -129,9 +142,19 @@
             cssPath: "{{ url_for('static', filename='css/') }}",
             bookmarkUrl: "{{ url_for('web.set_bookmark', book_id=bookid, book_format=book_format|upper) }}",
             bookUrl: "{{ url_for('web.serve_book', book_id=bookid, book_format=book_format, anyname='file.epub') }}",
-            bookmark: "{{ bookmark.bookmark_key if bookmark != None }}",
-            useBookmarks: "{{ current_user.is_authenticated | tojson }}",
-            kosyncPercent: {{ kosync_progress | tojson if kosync_progress is not none else 'null' }}
+            bookmark: {{ (bookmark.bookmark_key if bookmark else '')|tojson }},
+            useBookmarks: {{ current_user.is_authenticated | tojson }},
+            userId: {{ (current_user.id|string if current_user.is_authenticated else 'anonymous')|tojson }},
+            epubData: {{ epub_data|tojson }},
+            messages: {
+                openError: {{ _('Failed to open this EPUB. It may be damaged or encrypted.')|tojson }},
+                displayError: {{ _('Unable to display this EPUB page. Reload to try again.')|tojson }},
+                storageError: {{ _('Unable to save reading settings. Browser storage may be full or disabled.')|tojson }},
+                progressError: {{ _('Detailed reading progress is unavailable. You can continue reading.')|tojson }}
+            },
+            kosyncPercent: {{ kosync_progress | tojson if kosync_progress is not none else 'null' }},
+            progressSync: {{ progress_sync|tojson }},
+            csrfToken: {{ csrf_token()|tojson }}
         };
 
         window.themes = {
@@ -166,7 +189,7 @@
             // Add tick mark to the button corresponding to the currently selected theme
             document.getElementById(id).querySelector("span").textContent = "✓";
             // Saving theme to local storage
-            localStorage.setItem("calibre.reader.theme", id);
+            calibre.storage.set("calibre.reader.theme", id);
             // Apply theme to epubjs iframe
             reader.rendition.themes.select(id);
             // Apply theme to rest of the page. 
@@ -177,6 +200,7 @@
         // Font size and font logic (wait for reader to be ready)
         let defaultFont;
         window.selectFont = function(id) {
+          if (calibre.manga) return;
           if (!defaultFont) {
             try {
               defaultFont = reader.rendition.getContents()[0]?.css('font-family');
@@ -187,7 +211,7 @@
             spans[i].textContent = "";
           }
           document.getElementById(id).querySelector("span").textContent = "✓";
-          localStorage.setItem("calibre.reader.font", id);
+          calibre.storage.set("calibre.reader.font", id);
           if (id == 'default' && defaultFont) {
             reader.rendition.themes.font(defaultFont);
             return;
@@ -201,7 +225,7 @@
             spans[i].textContent = "";
           }
           document.getElementById(id).querySelector("span").textContent = "✓";
-          localStorage.setItem("calibre.reader.spread", id);
+          calibre.storage.set(calibre.manga ? calibre.storageKey + ".spread" : "calibre.reader.spread", id);
           reader.rendition.spread(id==='spread'?true:'none');
         }
 
@@ -209,13 +233,14 @@
         document.addEventListener("DOMContentLoaded", function() {
           let fontSizeFader = document.getElementById('fontSizeFader');
           if (fontSizeFader) {
-            let savedFontSize = localStorage.getItem("calibre.reader.fontSize");
+            let savedFontSize = calibre.storage.get("calibre.reader.fontSize");
             if (savedFontSize) {
               fontSizeFader.value = savedFontSize;
             }
             fontSizeFader.addEventListener("change", function () {
+              if (calibre.manga) return;
               reader.rendition.themes.fontSize(`${this.value}%`);
-              localStorage.setItem("calibre.reader.fontSize", this.value);
+              calibre.storage.set("calibre.reader.fontSize", this.value);
             });
           }
         });
@@ -223,19 +248,21 @@
         // Reflow logic
         document.addEventListener("DOMContentLoaded", function() {
           let reflowBox = document.getElementById('sidebarReflow');
-          if (reflowBox) {
-            let savedReflow = localStorage.getItem("calibre.reader.reflow");
+          if (reflowBox && !calibre.manga) {
+            let savedReflow = calibre.storage.get("calibre.reader.reflow");
             if (savedReflow !== null) {
               reflowBox.checked = savedReflow === 'true';
             }
             reflowBox.addEventListener("change", function() {
-              localStorage.setItem("calibre.reader.reflow", this.checked);
+              calibre.storage.set("calibre.reader.reflow", this.checked);
             });
           }
         });
       </script>
       <script src="{{ url_for('static', filename='js/libs/screenfull.min.js') }}"></script>
       <script src="{{ url_for('static', filename='js/libs/reader.min.js') }}"></script>
+      <script src="{{ url_for('static', filename='js/reading/progress-sync.js') }}"></script>
+      <script src="{{ url_for('static', filename='js/reading/epub-manga.js') }}"></script>
       <script src="{{ url_for('static', filename='js/reading/epub.js') }}"></script>
       <script src="{{ url_for('static', filename='js/reading/epub-progress.js') }}"></script>      
     </body>

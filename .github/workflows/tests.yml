@@ -71,6 +71,14 @@ jobs:
           touch /config/converter.log
           touch /config/cwa.db
       
+      - name: Set up Node.js for EPUB reader tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test EPUB reader behavior
+        run: node --test tests/unit/test_epub_reader.js tests/unit/test_progress_sync.js
+
       - name: Run smoke and unit tests
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/scripts

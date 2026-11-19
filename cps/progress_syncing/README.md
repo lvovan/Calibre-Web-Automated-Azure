@@ -45,6 +45,8 @@ KOReader partialMD5: Samples 1024 bytes at 11 positions (0, 4K, 16K, 64K, 256K, 
 
 **History tracking:** All checksums stored indefinitely. New checksums added alongside old ones when files change, enabling sync with any file version on user devices.
 
+**File-name document ids:** CrossPoint e-readers (by default) and KOReader's "file name" mode send `md5(basename)` instead. `checksums/filename.py` derives the names a device likely saved a book under (CrossPoint's sanitized OPDS names `Author - Title`, `Title - Author`, `Title`, plus CWA download names) and kosync matches unknown documents against an in-memory index of them, storing a hit with version `filename`.
+
 ## Database Schema
 
 ```sql

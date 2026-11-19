@@ -86,7 +86,7 @@ def env(monkeypatch):
         user.password = "x"
         session.add(user)
         session.commit()
-        users.append(types.SimpleNamespace(id=user.id, is_authenticated=True, is_anonymous=False))
+        users.append(types.SimpleNamespace(id=user.id, name=name, is_authenticated=True, is_anonymous=False))
 
     books = {BOOK_ID: types.SimpleNamespace(id=BOOK_ID, title="One Piece 1")}
     cps.calibre_db = types.SimpleNamespace(
@@ -230,7 +230,7 @@ def linking(env, monkeypatch):
     cps.calibre_db.get_filtered_book = lambda book_id: env.kosync_book if book_id == BOOK_ID else None
     checksums = types.ModuleType("cps.progress_syncing.checksums")
 
-    def store_checksum(book_id, book_format, checksum):
+    def store_checksum(book_id, book_format, checksum, **kwargs):
         env.session.add(env.models.BookFormatChecksum(book=book_id, format=book_format, checksum=checksum))
         env.session.commit()
         return True
@@ -295,3 +295,67 @@ def test_linking_supersedes_a_newer_web_reader_save_made_on_opening(linking):
     assert env.client.post(_url() + "/link", json={"document": "kindlehash", "format": "EPUB"}).status_code == 200
     state = env.client.get(_url()).get_json()
     assert (state["device"], state["percentage"]) == ("KindleOasis2", pytest.approx(0.1188))
+
+
+# CrossPoint e-readers identify documents by the MD5 of the file name they saved the OPDS download
+# under ("Author - Title.epub", sanitized), not by the file contents.
+RESTE_HASH = "4a3f57a566ecf745d73b9fd4a5170042"
+
+
+def _reste(env):
+    book = types.SimpleNamespace(id=BOOK_ID, title="Reste", path="Dieudonne, Adeline/Reste (42)",
+                                 authors=[types.SimpleNamespace(name="Dieudonné| Adeline")],
+                                 data=[types.SimpleNamespace(format="EPUB", name="Reste - Dieudonne, Adeline")])
+    import cps
+    cps.calibre_db.get_book = lambda book_id: book if book_id == BOOK_ID else None
+    cps.calibre_db.get_filtered_book = cps.calibre_db.get_book
+    return book
+
+
+def test_sanitized_opds_filename_matches_crosspoint():
+    import hashlib
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "filename_checksums", CPS_DIR / "progress_syncing" / "checksums" / "filename.py")
+    filename = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(filename)
+
+    assert filename.sanitize_filename('..  a/b\\c:d*e?f"g<h>i|j\x01 .') == "a_b_c_d_e_f_g_h_i_j"
+    assert filename.sanitize_filename(" ..") == "book"
+    assert filename.sanitize_filename("é" * 60) == "é" * 50
+    assert hashlib.md5("Dieudonné_ Adeline - Reste.epub".encode()).hexdigest() == RESTE_HASH
+    assert RESTE_HASH in filename.filename_hashes("Reste", ["Dieudonné| Adeline"], ["epub"])
+
+
+def test_web_reader_resumes_progress_a_device_stored_by_file_name(linking):
+    env = linking
+    _reste(env)
+    _koreader_record(env, RESTE_HASH, progress="/body/DocFragment[12]/body/div[1]/p[1]/span[1]/text()[1].0",
+                     percentage=5.2551)
+    _web_record(env, 2024, 0.0)
+
+    state = env.client.get(_url()).get_json()
+    assert (state["device"], state["percentage"]) == ("KindleOasis2", pytest.approx(0.052551))
+    with env.app.test_request_context():
+        config = env.kosync.reader_progress_config(BOOK_ID, "epub")
+        assert config["candidates"] == []
+        assert "alice" in config["messages"]["synced"]
+
+
+def test_device_file_name_hash_is_matched_to_the_library_book(linking, monkeypatch):
+    env = linking
+    book = _reste(env)
+    builds = []
+
+    def build():
+        builds.append(1)
+        return {h: (book.id, f) for h, f in env.kosync._book_filename_hashes(book).items()}
+
+    monkeypatch.setattr(env.kosync, "_build_filename_index", build)
+    assert env.kosync._filename_match(RESTE_HASH) == (BOOK_ID, "EPUB", "Reste", book.path, "filename")
+    stored = env.session.query(env.models.BookFormatChecksum).one()
+    assert (stored.book, stored.format, stored.checksum) == (BOOK_ID, "EPUB", RESTE_HASH)
+
+    assert env.kosync._filename_match("0" * 32) is None
+    assert env.kosync._filename_match("1" * 32) is None
+    assert len(builds) == 1

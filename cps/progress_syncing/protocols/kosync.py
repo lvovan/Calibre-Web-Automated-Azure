@@ -41,6 +41,8 @@ Reference: https://github.com/koreader/koreader-sync-server
 """
 
 import base64
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, Any, Tuple
 
@@ -55,6 +57,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from ... import logger, ub, csrf, config, constants, services, usermanagement
 from ...render_template import render_title_template
+from ..checksums.filename import FILENAME_CHECKSUM_VERSION, filename_hashes
 from ..models import KOSyncProgress
 from ..settings import is_koreader_sync_enabled
 
@@ -324,6 +327,11 @@ def get_book_by_checksum(document_checksum: str, version: str = None):
             log.debug(f"Found book match: {book_title} (ID {book_id}, format {book_format}, checksum v{checksum_version})")
             return book_id, book_format, book_title, book_path, checksum_version
 
+        if version in (None, FILENAME_CHECKSUM_VERSION):
+            match = _filename_match(document_checksum)
+            if match:
+                return match
+
         # No match found
         log.debug(f"No book found for checksum: {document_checksum}")
         return None, None, None, None, None
@@ -334,6 +342,75 @@ def get_book_by_checksum(document_checksum: str, version: str = None):
     except Exception as e:
         log.error(f"Unexpected error looking up book by checksum {document_checksum}: {e}")
         return None, None, None, None, None
+
+
+# Devices that identify documents by file name (CrossPoint's default, a KOReader option) send the MD5
+# of the name they saved the book under. Those hashes are matched against names derived from the
+# library metadata, indexed in memory and rebuilt at most every FILENAME_INDEX_RETRY seconds on a miss.
+FILENAME_INDEX_TTL = 600
+FILENAME_INDEX_RETRY = 60
+_filename_cache: dict[str, Any] = {"index": None, "built": 0.0}
+_filename_lock = threading.Lock()
+
+
+def _book_filename_hashes(book) -> dict[str, str]:
+    """{file-name hash: format} for one library book."""
+    authors = [author.name for author in getattr(book, "authors", None) or []]
+    hashes = {}
+    for data in getattr(book, "data", None) or []:
+        for checksum, book_format in filename_hashes(book.title, authors, [data.format], data.name, book.id).items():
+            hashes.setdefault(checksum, book_format)
+    return hashes
+
+
+def _build_filename_index() -> dict[str, tuple[int, str] | None]:
+    from sqlalchemy.orm import lazyload, selectinload
+
+    from ... import calibre_db
+    from ...db import Books
+
+    index: dict[str, tuple[int, str] | None] = {}
+    books = calibre_db.session.query(Books).options(
+        lazyload("*"), selectinload(Books.authors), selectinload(Books.data)).all()
+    for book in books:
+        for checksum, book_format in _book_filename_hashes(book).items():
+            # A name shared by two books (same title, no author) identifies neither.
+            if checksum in index and (index[checksum] or (None,))[0] != book.id:
+                index[checksum] = None
+            else:
+                index.setdefault(checksum, (book.id, book_format))
+    return index
+
+
+def _filename_index_lookup(checksum: str) -> tuple[int, str] | None:
+    with _filename_lock:
+        now = time.monotonic()
+        index, age = _filename_cache["index"], now - _filename_cache["built"]
+        if index is None or age > FILENAME_INDEX_TTL or (checksum not in index and age > FILENAME_INDEX_RETRY):
+            try:
+                index = _build_filename_index()
+            except (SQLAlchemyError, ImportError, AttributeError) as e:
+                log.warning(f"Could not index library file names: {e}")
+                index = index or {}
+            _filename_cache.update(index=index, built=now)
+        return index.get(checksum)
+
+
+def _filename_match(document_checksum: str):
+    """Match a file-name document hash to a book, remembering it as one of the book's checksums."""
+    from ... import calibre_db
+    from ..checksums import store_checksum
+
+    match = _filename_index_lookup(document_checksum)
+    if not match:
+        return None
+    book_id, book_format = match
+    book = calibre_db.get_book(book_id)
+    if not book:
+        return None
+    store_checksum(book_id, book_format, document_checksum, version=FILENAME_CHECKSUM_VERSION)
+    log.info(f"Matched file-name document {document_checksum} to book {book_id} ({book_format})")
+    return book_id, book_format, book.title, book.path, FILENAME_CHECKSUM_VERSION
 
 
 def enrich_response_with_book_info(response_data: Dict[str, Any], document_checksum: str) -> Dict[str, Any]:
@@ -863,6 +940,9 @@ def _web_progress_record(user_id: int, book_id: int) -> KOSyncProgress | None:
                       .filter(BookFormatChecksum.book == book_id).all()]
     except SQLAlchemyError as e:
         log.warning(f"Could not read checksums for book {book_id}: {e}")
+    book = calibre_db.get_book(book_id)
+    if book:
+        documents += list(_book_filename_hashes(book))
     return ub.session.query(KOSyncProgress).filter(
         KOSyncProgress.user_id == user_id,
         KOSyncProgress.document.in_(documents)
@@ -913,7 +993,8 @@ def reader_progress_config(book_id: int, book_format: str | None = None) -> dict
             "jump": _("Continue"),
             "dismiss": _("Dismiss"),
             "error": _("Reading progress could not be synchronized."),
-            "synced": _("Reading progress synchronized (%(percent)s).", percent="{percent}"),
+            "synced": _("Reading progress synchronized for %(user)s (%(percent)s).",
+                        user=current_user.name, percent="{percent}"),
             "syncing": _("Synchronizing reading progress…"),
         },
     }
@@ -947,7 +1028,8 @@ def _unmatched_progress(user_id: int, current: dict[str, Any] | None = None) -> 
         return []
     known = {row[0] for row in calibre_db.session.query(BookFormatChecksum.checksum).filter(
         BookFormatChecksum.checksum.in_([record.document for record in records])).all()}
-    return [record for record in records if record.document not in known][:MAX_LINK_CANDIDATES]
+    return [record for record in records if record.document not in known
+            and not _filename_index_lookup(record.document)][:MAX_LINK_CANDIDATES]
 
 
 @kosync.route("/kosync/reader/<int:book_id>/link", methods=["POST"])

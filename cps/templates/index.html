@@ -124,7 +124,7 @@
   </div>
   {% endif %}
 
-  {% set show_shelf_actions = page != 'discover' %}
+  {% set show_shelf_actions = page != 'discover' or (current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit())) %}
   {% if show_shelf_actions %}<div class="shelf-actions">{% endif %}
     {% if page == 'magicshelf' %}
     <div class="magic-shelf-buttons">
@@ -189,17 +189,19 @@
     {% endif %}
     </div>
    {% endif %}
-  {% if show_shelf_actions %}</div>{% endif %}
   {% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
   <div id="bulk-book-toolbar" class="bulk-book-toolbar">
-    <button type="button" class="btn btn-default" id="bulk-book-select" aria-pressed="false">{{ _('Select') }}</button>
     <div id="bulk-book-actions" hidden>
       <label><input type="checkbox" id="bulk-book-all"> {{ _('Select all shown') }}</label>
       <span id="bulk-book-count" role="status" aria-live="polite"></span>
       <button type="button" class="btn btn-default" id="bulk-book-clear">{{ _('Clear selection') }}</button>
       <button type="button" class="btn btn-primary" id="bulk-book-edit" disabled>{{ _('Edit') }}</button>
     </div>
+    <button type="button" class="btn btn-default" id="bulk-book-select" aria-pressed="false">{{ _('Select') }}</button>
   </div>
+  {% endif %}
+  {% if show_shelf_actions %}</div>{% endif %}
+  {% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
   <p id="bulk-book-notice" role="status" aria-live="polite"></p>
   {% endif %}
   <div class="row display-flex" data-bulk-book-grid>

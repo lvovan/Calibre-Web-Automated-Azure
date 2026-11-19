@@ -100,7 +100,7 @@
                 if (input) input.checked = selected.has(id);
             });
             $id("bulk-book-actions").hidden = !selecting;
-            $id("bulk-book-select").textContent = selecting ? text.done : text.select;
+            $id("bulk-book-select").textContent = selected.size ? format("selectCount", {count: selected.size}) : text.select;
             $id("bulk-book-select").setAttribute("aria-pressed", String(selecting));
             $id("bulk-book-count").textContent = format("selected", {count: selected.size});
             $id("bulk-book-edit").disabled = !selected.size || busy;

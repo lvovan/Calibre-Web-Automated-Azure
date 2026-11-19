@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 .bulk-book-toolbar,.bulk-book-toolbar #bulk-book-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
-.bulk-book-toolbar { margin:16px; }
+.bulk-book-toolbar { margin-left:auto; justify-content:flex-end; }
 .bulk-book-toolbar [hidden] { display:none !important; }
 .bulk-book-toolbar label { margin:0; font-weight:normal; }
 #bulk-book-notice { margin:0 16px 12px; }
-.bulk-cover-check { display:none; position:absolute; top:8px; left:8px; z-index:30; padding:6px; background:#fff; border:1px solid #777; border-radius:6px; color:#222; }
+.bulk-cover-check { display:none !important; position:absolute; top:8px; left:8px; z-index:30; padding:6px; background:#fff; border:1px solid #777; border-radius:6px; color:#222; }
 .bulk-cover-check input { width:20px; height:20px; margin:0; display:block; }
-.bulk-selecting .bulk-cover-check { display:block; }
+.bulk-selecting .bulk-cover-check { display:block !important; }
 .bulk-selecting .cover { cursor:pointer; }
 .bulk-selecting .cover-delete-btn { display:none !important; }
 .bulk-book-selected .cover { outline:3px solid #45b29d; outline-offset:3px; }

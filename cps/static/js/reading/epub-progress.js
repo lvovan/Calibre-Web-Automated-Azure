@@ -49,7 +49,7 @@
             calibre.sync.save(xpointer, percentage / 100);
         } else if (previous && previous.cfi === record.cfi && previous.pending) {
             Object.assign(record, {pending: true, savedAt: previous.savedAt, timestamp: previous.timestamp});
-        } else if (calibre.sync && calibre.sync.state) {
+        } else if (calibre.sync && calibre.sync.state && xpointer === calibre.sync.state.progress) {
             record.timestamp = calibre.sync.state.timestamp;
         }
         calibre.storage.set(locationKey, JSON.stringify(record));

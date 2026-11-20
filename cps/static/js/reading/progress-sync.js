@@ -34,6 +34,15 @@
         return Math.round(Math.max(0, Math.min(1, fraction)) * 100) + "%";
     }
 
+    /** Whether a browser position is authoritative for the supplied server state. */
+    function localPositionIsCurrent(record, state) {
+        if (!record || !state) return false;
+        if (record.pending && typeof record.savedAt === "number" &&
+                record.savedAt > state.timestamp * 1000) return true;
+        return typeof record.timestamp === "number" && record.timestamp >= state.timestamp &&
+            Boolean(record.xpointer) && record.xpointer === state.progress;
+    }
+
     // ---------------------------------------------------------------- KOReader XPointers (EPUB)
 
     function isText(node) {
@@ -323,5 +332,7 @@
         return session;
     }
 
-    root.CwaProgressSync = {create, xpointerFromNode, parseXPointer, resolveXPointer, parsePage, percentText};
+    root.CwaProgressSync = {
+        create, localPositionIsCurrent, xpointerFromNode, parseXPointer, resolveXPointer, parsePage, percentText
+    };
 })(typeof window !== "undefined" ? window : globalThis);

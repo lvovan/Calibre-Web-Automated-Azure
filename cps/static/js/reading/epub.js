@@ -80,9 +80,7 @@ var reader;
             calibre.sync.syncNow().finally(() => { syncButton.disabled = false; });
         });
     }
-    const localIsCurrent = localRecord && remote && (
-        (typeof localRecord.timestamp === "number" && localRecord.timestamp >= remote.timestamp) ||
-        (localRecord.pending && localRecord.savedAt > remote.timestamp * 1000));
+    const localIsCurrent = window.CwaProgressSync.localPositionIsCurrent(localRecord, remote);
     calibre.remoteStart = null;
     if (remote && !localIsCurrent) {
         calibre.remoteStart = remote;

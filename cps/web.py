@@ -1671,13 +1671,33 @@ def series_list():
                                          page="serieslist",
                                          data="series", order=order_no)
         else:
-            entries = (calibre_db.session.query(db.Books, func.count('books_series_link').label('count'),
+            grouped_entries = (calibre_db.session.query(db.Books, func.count('books_series_link').label('count'),
                                                 func.max(db.Books.series_index), db.Books.id)
                        .join(db.books_series_link).join(db.Series).filter(calibre_db.common_filters())
                        .group_by(text('books_series_link.series'))
                        .having(or_(func.max(db.Books.series_index), db.Books.series_index==""))
                        .order_by(order)
                        .all())
+            series_ids = [entry[0].series[0].id for entry in grouped_entries if entry[0].series]
+            representative_books = {}
+            if series_ids:
+                representatives = (calibre_db.session.query(db.books_series_link.c.series, db.Books)
+                                   .join(db.Books, db.Books.id == db.books_series_link.c.book)
+                                   .filter(db.books_series_link.c.series.in_(series_ids))
+                                   .filter(db.Books.series_index == 1)
+                                   .filter(calibre_db.common_filters())
+                                   .order_by(db.books_series_link.c.series, db.Books.id)
+                                   .all())
+                for series_id, book in representatives:
+                    representative_books.setdefault(series_id, book)
+            entries = [
+                {
+                    "book": representative_books.get(entry[0].series[0].id, entry[0]),
+                    "count": entry.count,
+                }
+                for entry in grouped_entries
+                if entry[0].series
+            ]
             return render_title_template('grid.html', entries=entries, folder='web.books_list', charlist=char_list,
                                          title=_("Series"), page="serieslist", data="series", bodyClass="grid-view",
                                          order=order_no)

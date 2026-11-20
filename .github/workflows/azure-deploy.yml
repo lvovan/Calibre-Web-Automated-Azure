@@ -55,6 +55,7 @@ jobs:
           echo "repo=${repo}" >> "$GITHUB_OUTPUT"
           echo "image=${repo}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "version=${base_version}-azure.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "cache_ref=${repo}:buildcache" >> "$GITHUB_OUTPUT"
           now=$(date -u +%s)
           echo "build_date=$(date -u -d "@${now}" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "build_number=$(date -u -d "@${now}" +%Y%m%d.%H%M%S)" >> "$GITHUB_OUTPUT"
@@ -82,8 +83,12 @@ jobs:
             INSTALL_KEPUBIFY=false
             UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu/ http://mirrors.edge.kernel.org/ubuntu/ http://archive.ubuntu.com/ubuntu/
             PIP_EXCLUDE=google-api-python-client PyDrive2 oauth2client google-auth-oauthlib goodreads python-Levenshtein python-ldap Flask-SimpleLDAP scholarly
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ steps.meta.outputs.cache_ref }}
+          cache-to: |
+            type=gha,mode=max
+            type=registry,ref=${{ steps.meta.outputs.cache_ref }},mode=max
 
       # Start the image on the runner (outside App Service, so the Azure storage
       # checks are skipped) to catch startup regressions before deploying.
@@ -134,7 +139,7 @@ jobs:
             echo "Stopped ${app}"
           fi
 
-      - name: Deploy Bicep
+      - name: Deploy application
         id: deploy
         env:
           CWA_CONTAINER_IMAGE: ${{ needs.build.outputs.image || format('ghcr.io/{0}:latest', github.repository) }}
@@ -165,18 +170,48 @@ jobs:
           else
             echo "content_configured=true" >> "$GITHUB_OUTPUT"
           fi
+          app="${{ steps.stop.outputs.app }}"
           echo "Deploying image ${CWA_CONTAINER_IMAGE}"
-          outputs=$(az deployment group create \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "cwa-${GITHUB_RUN_ID}" \
-            --parameters infra/main.bicepparam \
-            --query properties.outputs -o json)
-          echo "default_url=$(jq -r .defaultUrl.value <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          infra_before="${{ github.event.before }}"
+          infra_changed=true
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "$infra_before" ] && [ "$infra_before" != "0000000000000000000000000000000000000000" ]; then
+            if git diff --quiet "$infra_before" "${GITHUB_SHA}" -- infra; then
+              infra_changed=false
+            fi
+          fi
+          if [ "$infra_changed" = true ]; then
+            outputs=$(az deployment group create \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "cwa-${GITHUB_RUN_ID}" \
+              --parameters infra/main.bicepparam \
+              --query properties.outputs -o json)
+            default_url=$(jq -r .defaultUrl.value <<<"$outputs")
+            custom_url=$(jq -r .customUrl.value <<<"$outputs")
+            verification_id=$(jq -r .customDomainVerificationId.value <<<"$outputs")
+          else
+            az webapp config container set \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "$app" \
+              --container-image-name "$CWA_CONTAINER_IMAGE" \
+              -o none
+            default_host=$(az webapp show -g "${{ vars.AZURE_RESOURCE_GROUP }}" -n "$app" \
+              --query defaultHostName -o tsv)
+            default_url="https://${default_host}"
+            custom_url=""
+            if [ -n "${{ vars.CUSTOM_DOMAIN_NAME }}" ]; then
+              custom_url="https://${{ vars.CUSTOM_DOMAIN_NAME }}"
+            fi
+            verification_id=""
+          fi
+          echo "default_url=${default_url}" >> "$GITHUB_OUTPUT"
           {
             echo "### Deployment outputs"
-            echo "- Default URL: $(jq -r .defaultUrl.value <<<"$outputs")"
-            echo "- Custom URL: $(jq -r .customUrl.value <<<"$outputs")"
-            echo "- Custom domain verification ID (asuid TXT): $(jq -r .customDomainVerificationId.value <<<"$outputs")"
+            echo "- Default URL: ${default_url}"
+            echo "- Custom URL: ${custom_url}"
+            if [ -n "$verification_id" ]; then
+              echo "- Custom domain verification ID (asuid TXT): ${verification_id}"
+            fi
+            echo "- Infrastructure redeployed: ${infra_changed}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Also runs when the deployment failed, so the previous version comes back up
@@ -191,7 +226,7 @@ jobs:
           EXPECTED_BUILD: ${{ needs.build.outputs.build_number }}
         run: |
           base="${{ steps.deploy.outputs.default_url }}"
-          for i in $(seq 1 60); do
+          for i in $(seq 1 180); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$base/health" || true)
             build=$(curl -s --max-time 20 "$base/version" | jq -r '.build // empty' 2>/dev/null || true)
             echo "Attempt $i: HTTP $code, build ${build:-?} (expected ${EXPECTED_BUILD:-any})"
@@ -199,7 +234,7 @@ jobs:
               echo "- Build: ${build}" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            sleep 20
+            sleep 5
           done
-          echo "::error::App did not become healthy on build ${EXPECTED_BUILD} within 20 minutes. Check Log stream / AppServiceConsoleLogs."
+          echo "::error::App did not become healthy on build ${EXPECTED_BUILD} within 15 minutes. Check Log stream / AppServiceConsoleLogs."
           exit 1

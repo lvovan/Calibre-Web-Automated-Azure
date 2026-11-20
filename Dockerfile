@@ -281,11 +281,18 @@ RUN \
   /usr/share/man/* \
   /root/.cache
 
-# STEP 6 - Copy application files
-# Copy the rest of the application code (changes most frequently)
-COPY --chown=abc:abc . /app/calibre-web-automated/
+# STEP 6 - Prepare infrequently changing application setup artifacts.
+# Keeping these COPY/RUN instructions separate lets code-only builds reuse the most
+# expensive setup and plugin packaging work.
+COPY --from=dependencies --chown=abc:abc \
+  /app/calibre-web-automated/requirements.txt \
+  /app/calibre-web-automated/optional-requirements.txt \
+  /app/calibre-web-automated/
+COPY --chown=abc:abc root/ /app/calibre-web-automated/root/
+COPY --chown=abc:abc scripts/setup-cwa.sh /app/calibre-web-automated/scripts/setup-cwa.sh
+COPY --chown=abc:abc koreader/plugins/cwasync.koplugin/ /tmp/cwasync.koplugin/
 
-# STEP 7 - Configure application
+# STEP 7 - Configure stable application setup and package the KOReader plugin.
 RUN \
   # STEP 7.1 - Move contents of /app/calibre-web-automated/root to / and delete the /app/calibre-web-automated/root directory
   cp -R /app/calibre-web-automated/root/* / && \
@@ -293,17 +300,11 @@ RUN \
   # STEP 7.2 - Run CWA install script to make required dirs, set script permissions and add aliases for CLI commands  ect.
   chmod +x /app/calibre-web-automated/scripts/setup-cwa.sh && \
   /app/calibre-web-automated/scripts/setup-cwa.sh && \
-  # STEP 7.2.1 - Move PIP_EXCLUDE packages to optional-requirements.txt, otherwise
-  # the startup dependency check exits because a "required" package is missing
-  for pkg in $PIP_EXCLUDE; do \
-  grep -iE "^${pkg}([<>=!~;[ ]|$)" /app/calibre-web-automated/requirements.txt \
-  >> /app/calibre-web-automated/optional-requirements.txt || true; \
-  sed -i -E "/^${pkg}([<>=!~;[ ]|$)/Id" /app/calibre-web-automated/requirements.txt; \
-  done && \
   # STEP 7.3 - Create koplugin.zip from KOReader plugin folder
   echo "~~~~ Creating koplugin.zip from KOReader plugin folder... ~~~~" && \
-  if [ -d "/app/calibre-web-automated/koreader/plugins/cwasync.koplugin" ]; then \
-  cd /app/calibre-web-automated/koreader/plugins && \
+  if [ -d "/tmp/cwasync.koplugin" ]; then \
+  mkdir -p /opt/cwa-build/plugins && \
+  cd /tmp && \
   # Calculate digest of all files in the plugin for debugging purposes
   echo "Calculating digest of plugin files..." && \
   PLUGIN_DIGEST=$(find cwasync.koplugin -type f -name "*.lua" -o -name "*.json" | sort | xargs sha256sum | sha256sum | cut -d' ' -f1) && \
@@ -313,20 +314,27 @@ RUN \
   echo "Build date: $(date)" >> cwasync.koplugin/${PLUGIN_DIGEST}.digest && \
   echo "Files included:" >> cwasync.koplugin/${PLUGIN_DIGEST}.digest && \
   find cwasync.koplugin -type f -name "*.lua" -o -name "*.json" | sort >> cwasync.koplugin/${PLUGIN_DIGEST}.digest && \
-  zip -r koplugin.zip cwasync.koplugin/ && \
+  zip -r /opt/cwa-build/plugins/koplugin.zip cwasync.koplugin/ && \
   echo "Created koplugin.zip from cwasync.koplugin folder with digest file: ${PLUGIN_DIGEST}.digest"; \
   else \
   echo "Warning: cwasync.koplugin folder not found, skipping zip creation"; \
   fi && \
-  # STEP 7.4 - Move koplugin.zip to static directory
-  if [ -f "/app/calibre-web-automated/koreader/plugins/koplugin.zip" ]; then \
+  true
+
+# STEP 8 - Copy application files that change most frequently.
+COPY --chown=abc:abc . /app/calibre-web-automated/
+
+RUN \
+  # Re-apply optional dependency filtering after the full source copy.
+  for pkg in $PIP_EXCLUDE; do \
+  grep -iE "^${pkg}([<>=!~;[ ]|$)" /app/calibre-web-automated/requirements.txt \
+  >> /app/calibre-web-automated/optional-requirements.txt || true; \
+  sed -i -E "/^${pkg}([<>=!~;[ ]|$)/Id" /app/calibre-web-automated/requirements.txt; \
+  done && \
   mkdir -p /app/calibre-web-automated/cps/static && \
-  cp /app/calibre-web-automated/koreader/plugins/koplugin.zip /app/calibre-web-automated/cps/static/ && \
-  echo "Moved koplugin.zip to static directory"; \
-  else \
-  echo "Warning: koplugin.zip not found, skipping move to static directory"; \
-  fi && \
-  # STEP 7.5 - ADD files referencing the versions of the installed main packages
+  cp /opt/cwa-build/plugins/koplugin.zip /app/calibre-web-automated/cps/static/ && \
+  rm -rf /app/calibre-web-automated/root \
+  /opt/cwa-build/plugins/koplugin.zip /tmp/cwasync.koplugin && \
   echo "$VERSION" >| /app/CWA_RELEASE && \
   if [[ "${INSTALL_KEPUBIFY,,}" == "true" ]]; then echo "$KEPUBIFY_RELEASE" >| /app/KEPUBIFY_RELEASE; else echo "not installed" >| /app/KEPUBIFY_RELEASE; fi && \
   echo "$CALIBRE_RELEASE" > /CALIBRE_RELEASE

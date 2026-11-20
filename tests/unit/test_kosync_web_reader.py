@@ -144,6 +144,28 @@ def test_progress_round_trip_is_per_user(env):
     assert env.session.query(env.models.KOSyncProgress).count() == 2
 
 
+def test_book_progress_uses_latest_linked_record_and_isolates_users(env):
+    env.session.add(env.models.BookFormatChecksum(book=BOOK_ID, format="EPUB", checksum="abc123"))
+    env.session.add_all([
+        env.models.KOSyncProgress(user_id=user.id, document=document, progress="12",
+                                  percentage=percentage, device="KOReader",
+                                  timestamp=datetime(2024, 1, day, tzinfo=timezone.utc))
+        for user, document, percentage, day in [
+            (env.users[0], str(BOOK_ID), 60.0, 1),
+            (env.users[0], "abc123", 0.0, 2),
+            (env.users[0], "unlinked", 75.0, 3),
+            (env.users[1], str(BOOK_ID), 90.0, 3),
+            (env.users[0], str(HIDDEN_BOOK_ID), 40.0, 1),
+        ]
+    ])
+    env.session.commit()
+
+    lookup = env.kosync.book_progress_percentages
+    assert lookup(env.users[0].id, {BOOK_ID, 99}) == {BOOK_ID: 0.0}
+    assert lookup(env.users[1].id, {BOOK_ID, HIDDEN_BOOK_ID}) == {BOOK_ID: 90.0}
+    assert lookup(env.users[0].id, set()) == {}
+
+
 def test_reads_and_updates_progress_a_device_stored_by_checksum(env):
     env.session.add(env.models.BookFormatChecksum(book=BOOK_ID, format="EPUB", checksum="abc123"))
     env.session.add(env.models.KOSyncProgress(user_id=env.users[0].id, document="abc123", progress="12",

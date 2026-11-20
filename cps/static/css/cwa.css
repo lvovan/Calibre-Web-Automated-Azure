@@ -46,9 +46,78 @@ body.modal-open #remove-from-shelves + .tags {
     max-width: 40vw;
 }
 
-/* Book format pills on the upper-right of book covers (non-interactive). */
+/* Anchor the format pills and the progress indicator to each cover. */
 .book > .cover {
     position: relative;
+}
+
+.book-progress {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 14px;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: inherit;
+}
+
+.book-progress--cover {
+    /* Reuse the cover's existing 10px bottom margin instead of growing the card. */
+    position: absolute;
+    inset-inline: 0;
+    top: 100%;
+    height: 10px;
+}
+
+.book-progress--detail {
+    width: min(100%, 12rem);
+    font-size: 11px;
+}
+
+.book-detail-heading {
+    display: flex;
+    flex-direction: column;
+    gap: calc(12px + 1rem);
+}
+
+.book-detail-heading.has-progress {
+    gap: calc((12px + 1rem - 14px) / 2);
+}
+
+.book-detail-heading > #title,
+.book-detail-heading > .author {
+    margin: 0;
+}
+
+.book-progress > span {
+    opacity: .8;
+}
+
+.book-progress progress {
+    flex: 1;
+    min-width: 0;
+    height: 3px;
+    appearance: none;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.book-progress progress::-webkit-progress-bar {
+    background: transparent;
+}
+.book-progress progress::-webkit-progress-value {
+    background: currentColor;
+    border-radius: 2px;
+    opacity: .6;
+}
+.book-progress progress::-moz-progress-bar {
+    background: currentColor;
+    border-radius: 2px;
+    opacity: .6;
 }
 
 .book > .cover .cover-formats {

@@ -64,13 +64,10 @@
         }
 
         .book-detail-meta h2#title {
-            margin: 0;
             font-size: 3rem;
-            margin-bottom: 1rem;
         }
 
         .book-detail-meta .author {
-            margin: 0;
             opacity: 0.85;
         }
 
@@ -622,15 +619,21 @@
                             </div>
                         </div>
 
-                        <h2 id="title">{{ entry.title }}</h2>
-                        <p class="author">
-                            {% for author in entry.ordered_authors %}
-                                <a href="{{ url_for('web.books_list',  data='author', sort_param='stored', book_id=author.id ) }}">{{ author.name.replace('|',',') }}</a>
-                                {% if not loop.last %}
-                                    &amp;
-                                {% endif %}
-                            {% endfor %}
-                        </p>
+                        {% set show_progress = book_progress is defined and book_progress is not none %}
+                        <div class="book-detail-heading{% if show_progress %} has-progress{% endif %}">
+                            <h2 id="title">{{ entry.title }}</h2>
+                            {% if show_progress %}
+                                {{ image.reading_progress(book_progress.get(entry.id, 0), 'detail') }}
+                            {% endif %}
+                            <p class="author">
+                                {% for author in entry.ordered_authors %}
+                                    <a href="{{ url_for('web.books_list',  data='author', sort_param='stored', book_id=author.id ) }}">{{ author.name.replace('|',',') }}</a>
+                                    {% if not loop.last %}
+                                        &amp;
+                                    {% endif %}
+                                {% endfor %}
+                            </p>
+                        </div>
                         {% set current_rating = (entry.ratings[0].rating / 2)|int if entry.ratings|length > 0 else 0 %}
                         <div class="rating" id="detail-rating-block">
                             {% if current_user.role_edit() %}
@@ -786,15 +789,6 @@
                                 <div class="publishing-date meta-chip">
                                     <span>{{ _('Published') }}:</span>
                                     <span class="meta-value">{{ entry.pubdate|formatdate }}</span>
-                                </div>
-                            {% endif %}
-                            {% if kosync_progress is not none %}
-                                <div class="meta-chip">
-                                    <span class="meta-label">{{ _('KOReader Progress') }}:</span>
-                                    <span class="meta-value">{{ kosync_progress|formatfloat(1) }}%</span>
-                                    {% if kosync_progress_timestamp %}
-                                        <span class="meta-value">({{ kosync_progress_timestamp|formatdate }})</span>
-                                    {% endif %}
                                 </div>
                             {% endif %}
                             {% if cc|length > 0 %}

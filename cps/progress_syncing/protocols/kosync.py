@@ -929,6 +929,33 @@ def update_progress():
 WEB_DEVICE_NAME = "CWA Web Reader"
 
 
+def book_progress_percentages(user_id: int, book_ids: set[int]) -> dict[int, float]:
+    """Resolve saved KOReader progress for a page of books, including registered aliases."""
+    from ... import calibre_db
+    from ...db import BookFormatChecksum
+
+    if not book_ids:
+        return {}
+    documents = {str(book_id): {book_id} for book_id in book_ids}
+    aliases = calibre_db.session.query(BookFormatChecksum.checksum, BookFormatChecksum.book).filter(
+        BookFormatChecksum.book.in_(book_ids)
+    )
+    for checksum, book_id in aliases:
+        documents.setdefault(checksum, set()).add(book_id)
+
+    percentages = {}
+    records = ub.session.query(KOSyncProgress.document, KOSyncProgress.percentage).filter(
+        KOSyncProgress.user_id == user_id,
+        KOSyncProgress.document.in_(documents)
+    ).order_by(KOSyncProgress.timestamp.desc(), KOSyncProgress.id.desc())
+    for document, percentage in records:
+        # A checksum shared by multiple displayed books cannot identify one of them.
+        matches = documents[document]
+        if len(matches) == 1:
+            percentages.setdefault(next(iter(matches)), max(0.0, min(percentage, 100.0)))
+    return percentages
+
+
 def _web_progress_record(user_id: int, book_id: int) -> KOSyncProgress | None:
     """Latest progress for a book, whether KOReader stored it by book id or by an unmatched checksum."""
     from ... import calibre_db

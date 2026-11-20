@@ -3117,20 +3117,6 @@ def show_book(book_id):
             if media_format.format.lower() in constants.EXTENSIONS_AUDIO:
                 entry.audio_entries.append(media_format.format.lower())
 
-        kosync_progress = None
-        kosync_progress_timestamp = None
-        if current_user.is_authenticated:
-            try:
-                kobo_state = (ub.session.query(ub.KoboReadingState)
-                              .filter(ub.KoboReadingState.user_id == int(current_user.id),
-                                      ub.KoboReadingState.book_id == book_id)
-                              .first())
-                if kobo_state and kobo_state.current_bookmark:
-                    kosync_progress = kobo_state.current_bookmark.progress_percent
-                    kosync_progress_timestamp = kobo_state.current_bookmark.last_modified
-            except Exception as e:
-                log.debug(f"Failed to load KOReader progress for book {book_id}: {e}")
-
         cwa_db = CWA_DB()
         cwa_settings = cwa_db.cwa_settings
 
@@ -3141,8 +3127,6 @@ def show_book(book_id):
                                      title=entry.title,
                                      books_shelfs=book_in_shelves,
                                      cwa_settings=cwa_settings,
-                                     kosync_progress=kosync_progress,
-                                     kosync_progress_timestamp=kosync_progress_timestamp,
                                      page="book")
     else:
         log.debug("Selected book is unavailable. File does not exist or is not accessible")

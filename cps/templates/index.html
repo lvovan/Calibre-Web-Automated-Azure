@@ -64,6 +64,9 @@
               </span>
           </a>
           {{ image.format_pills(entry.Books) }}
+          {% if book_progress is defined and book_progress is not none %}
+            {{ image.reading_progress(book_progress.get(entry.Books.id, 0), 'cover') }}
+          {% endif %}
       </div>
       <div class="meta">
         <a href="{{ url_for('web.show_book', book_id=entry.Books.id) }}" {% if simple==false %}data-toggle="modal" data-target="#bookDetailsModal" data-remote="false"{% endif %}>
@@ -220,6 +223,9 @@
             </span>
           </a>
           {{ image.format_pills(entry.Books) }}
+          {% if book_progress is defined and book_progress is not none %}
+            {{ image.reading_progress(book_progress.get(entry.Books.id, 0), 'cover') }}
+          {% endif %}
       </div>
       <div class="meta">
         <a href="{{ url_for('web.show_book', book_id=entry.Books.id) }}" {% if simple==false %}data-toggle="modal" data-target="#bookDetailsModal" data-remote="false"{% endif %}>

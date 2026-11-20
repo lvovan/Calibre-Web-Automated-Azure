@@ -30,3 +30,10 @@
         loading="lazy"
     />
 {%- endmacro %}
+
+{% macro reading_progress(percentage, placement) -%}
+    <span class="book-progress book-progress--{{ placement }}">
+        <progress value="{{ percentage }}" max="100" aria-label="{{ _('Reading progress') }}"></progress>
+        <span aria-hidden="true">{{ percentage|round|int }}%</span>
+    </span>
+{%- endmacro %}

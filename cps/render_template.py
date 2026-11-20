@@ -12,6 +12,7 @@ import polib
 from werkzeug.local import LocalProxy
 from .cw_login import current_user
 from sqlalchemy.sql.expression import or_
+from sqlalchemy.exc import SQLAlchemyError
 
 from . import config, constants, logger, ub
 from .ub import User
@@ -293,6 +294,28 @@ def translations_missing_notification() -> None:
     else:
         return
 
+def _book_progress_context(template, context):
+    if not current_user.is_authenticated or current_user.is_anonymous:
+        return None
+    if template == "detail.html":
+        book_ids = {context["entry"].id}
+    elif template in ("index.html", "author.html", "search.html", "shelf.html"):
+        book_ids = {row.Books.id for row in context.get("entries", ())}
+        random_books = context.get("random")
+        # Views without random recommendations may pass SQLAlchemy's false() sentinel.
+        if isinstance(random_books, (list, tuple)):
+            book_ids.update(row.Books.id for row in random_books)
+    else:
+        return None
+
+    from .progress_syncing.protocols.kosync import book_progress_percentages
+    try:
+        return book_progress_percentages(int(current_user.id), book_ids)
+    except SQLAlchemyError:
+        log.warning("Could not load KOReader progress for book cards", exc_info=True)
+        return None
+
+
 # Returns the template for rendering and includes the instance name
 def render_title_template(*args, **kwargs):
     sidebar, simple = get_sidebar_config(kwargs)
@@ -391,6 +414,7 @@ def render_title_template(*args, **kwargs):
                        accept=config.config_upload_formats.split(','),
                        magic_shelf_routes=magic_shelf_routes,
                        duplicate_notification=duplicate_notification,
+                       book_progress=_book_progress_context(args[0], kwargs) if args else None,
                        *args, **kwargs)
     except PermissionError:
         log.error("No permission to access {} file.".format(args[0]))

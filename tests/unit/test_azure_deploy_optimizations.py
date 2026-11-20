@@ -20,7 +20,7 @@ def test_code_only_deploy_can_skip_bicep():
 def test_build_uses_persistent_registry_cache():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "type=registry,ref=${{ steps.meta.outputs.cache_ref }},ignore-error=true" in workflow
-    assert "type=registry,ref=${{ steps.meta.outputs.cache_ref }},mode=max" in workflow
+    assert "type=registry,ref=${{ steps.meta.outputs.cache_ref }},mode=min" in workflow
 
 
 def test_health_polling_is_bounded_and_faster():

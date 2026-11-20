@@ -81,10 +81,10 @@ def init_cache_busting(app):
                     "font/woff2", "image/svg+xml", "image/webp", "image/png",
                     "image/jpeg"):
                 if request_path_is_static():
-                    response.cache_control.public = True
-                    response.cache_control.max_age = 31536000 if versioned_static_request() else 3600
                     if versioned_static_request():
-                        response.cache_control.immutable = True
+                        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                    else:
+                        response.headers["Cache-Control"] = "public, max-age=3600"
         return response
 
     def request_path_is_static():

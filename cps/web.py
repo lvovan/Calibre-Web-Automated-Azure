@@ -1810,9 +1810,7 @@ def get_cover(book_id, resolution=None):
     cover_resolution = resolutions.get(resolution, None)
     response = get_book_cover(book_id, cover_resolution)
     if request.args.get("c") and response:
-        response.cache_control.private = True
-        response.cache_control.max_age = 31536000
-        response.cache_control.immutable = True
+        response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
     return response
 
 
@@ -1829,9 +1827,7 @@ def get_series_cover(series_id, resolution=None):
     cover_resolution = resolutions.get(resolution, None)
     response = get_series_cover_thumbnail(series_id, cover_resolution)
     if request.args.get("c") and response:
-        response.cache_control.private = True
-        response.cache_control.max_age = 31536000
-        response.cache_control.immutable = True
+        response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
     return response
 
 

@@ -44,5 +44,7 @@ def test_static_assets_receive_production_cache_headers(monkeypatch, tmp_path):
 
     assert "immutable" in versioned.headers["Cache-Control"]
     assert "max-age=31536000" in versioned.headers["Cache-Control"]
+    assert "no-cache" not in versioned.headers["Cache-Control"]
     assert "immutable" not in unversioned.headers["Cache-Control"]
     assert "max-age=3600" in unversioned.headers["Cache-Control"]
+    assert "no-cache" not in unversioned.headers["Cache-Control"]

@@ -33,9 +33,9 @@ def test_healthcheck_still_follows_the_login_redirect():
     assert _healthcheck_command().count("-fsL") == 2
 
 
-def test_setup_and_plugin_packaging_are_cached_before_full_source_copy():
+def test_root_install_and_plugin_packaging_are_cached_before_full_source_copy():
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
-    plugin_build = dockerfile.index("Configure stable application setup")
+    plugin_build = dockerfile.index("Install stable root files")
     full_copy = dockerfile.index("COPY --chown=abc:abc . /app/calibre-web-automated/")
     assert plugin_build < full_copy
     assert dockerfile.index("COPY --chown=abc:abc root/") < plugin_build

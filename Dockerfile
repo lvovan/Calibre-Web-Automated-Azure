@@ -292,15 +292,12 @@ COPY --chown=abc:abc root/ /app/calibre-web-automated/root/
 COPY --chown=abc:abc scripts/setup-cwa.sh /app/calibre-web-automated/scripts/setup-cwa.sh
 COPY --chown=abc:abc koreader/plugins/cwasync.koplugin/ /tmp/cwasync.koplugin/
 
-# STEP 7 - Configure stable application setup and package the KOReader plugin.
+# STEP 7 - Install stable root files and package the KOReader plugin.
 RUN \
   # STEP 7.1 - Move contents of /app/calibre-web-automated/root to / and delete the /app/calibre-web-automated/root directory
   cp -R /app/calibre-web-automated/root/* / && \
   rm -R /app/calibre-web-automated/root/ && \
-  # STEP 7.2 - Run CWA install script to make required dirs, set script permissions and add aliases for CLI commands  ect.
-  chmod +x /app/calibre-web-automated/scripts/setup-cwa.sh && \
-  /app/calibre-web-automated/scripts/setup-cwa.sh && \
-  # STEP 7.3 - Create koplugin.zip from KOReader plugin folder
+  # STEP 7.2 - Create koplugin.zip from KOReader plugin folder
   echo "~~~~ Creating koplugin.zip from KOReader plugin folder... ~~~~" && \
   if [ -d "/tmp/cwasync.koplugin" ]; then \
   mkdir -p /opt/cwa-build/plugins && \
@@ -325,6 +322,9 @@ RUN \
 COPY --chown=abc:abc . /app/calibre-web-automated/
 
 RUN \
+  # Run CWA install script to make required dirs, set script permissions and add aliases.
+  chmod +x /app/calibre-web-automated/scripts/setup-cwa.sh && \
+  /app/calibre-web-automated/scripts/setup-cwa.sh && \
   # Re-apply optional dependency filtering after the full source copy.
   for pkg in $PIP_EXCLUDE; do \
   grep -iE "^${pkg}([<>=!~;[ ]|$)" /app/calibre-web-automated/requirements.txt \

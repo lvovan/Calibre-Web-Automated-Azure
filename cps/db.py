@@ -1329,18 +1329,17 @@ class CalibreDB:
             query = query.order_by(*sort_columns)
             if parsed is not None:
                 query = query.order_by(Books.id)
-        result = query.all()
-        result_count = len(result)
+        result_ids = query.with_entities(Books.id).distinct().all()
+        result_count = len(result_ids)
         if offset is not None and limit is not None:
             offset = int(offset)
-            limit_all = offset + int(limit)
             pagination = Pagination((offset / (int(limit)) + 1), limit, result_count)
+            result = query.offset(offset).limit(int(limit)).all()
         else:
-            offset = 0
-            limit_all = result_count
+            result = query.all()
 
-        ub.store_combo_ids(result)
-        entries = self.order_authors(result[offset:limit_all], list_return=True, combined=True)
+        ub.store_combo_ids(result_ids)
+        entries = self.order_authors(result, list_return=True, combined=True)
 
         return entries, result_count, pagination
 

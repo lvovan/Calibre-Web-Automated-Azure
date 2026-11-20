@@ -1808,7 +1808,12 @@ def get_cover(book_id, resolution=None):
         'lg': constants.COVER_THUMBNAIL_LARGE,
     }
     cover_resolution = resolutions.get(resolution, None)
-    return get_book_cover(book_id, cover_resolution)
+    response = get_book_cover(book_id, cover_resolution)
+    if request.args.get("c") and response:
+        response.cache_control.private = True
+        response.cache_control.max_age = 31536000
+        response.cache_control.immutable = True
+    return response
 
 
 @web.route("/series_cover/<int:series_id>")
@@ -1822,7 +1827,12 @@ def get_series_cover(series_id, resolution=None):
         'lg': constants.COVER_THUMBNAIL_LARGE,
     }
     cover_resolution = resolutions.get(resolution, None)
-    return get_series_cover_thumbnail(series_id, cover_resolution)
+    response = get_series_cover_thumbnail(series_id, cover_resolution)
+    if request.args.get("c") and response:
+        response.cache_control.private = True
+        response.cache_control.max_age = 31536000
+        response.cache_control.immutable = True
+    return response
 
 
 

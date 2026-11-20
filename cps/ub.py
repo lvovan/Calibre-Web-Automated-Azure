@@ -154,7 +154,8 @@ def store_ids(result):
 def store_combo_ids(result):
     ids = list()
     for element in result:
-        ids.append(element[0].id)
+        value = element[0]
+        ids.append(value.id if hasattr(value, "id") else value)
     searched_ids[current_user.id] = ids
 
 

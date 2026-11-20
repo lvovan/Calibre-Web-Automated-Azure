@@ -12,6 +12,7 @@ import os
 import mimetypes
 
 from flask import Flask, g, session
+from flask_compress import Compress
 from .MyLoginManager import MyLoginManager
 from flask_principal import Principal
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -117,6 +118,14 @@ else:
 
 
 def create_app():
+    app.config.update(
+        COMPRESS_MIN_SIZE=500,
+        COMPRESS_MIMETYPES=[
+            "text/html", "text/css", "text/javascript", "application/javascript",
+            "application/json", "image/svg+xml",
+        ],
+    )
+    Compress(app)
     if csrf:
         csrf.init_app(app)
 
@@ -198,8 +207,7 @@ def create_app():
     if os.environ.get(host_allowlist.ENV_VAR):
         log.info('Restricting access to hosts: %s', os.environ.get(host_allowlist.ENV_VAR))
 
-    if os.environ.get('FLASK_DEBUG'):
-        cache_buster.init_cache_busting(app)
+    cache_buster.init_cache_busting(app)
     log.info('Starting Calibre Web...')
     Principal(app)
     lm.init_app(app)

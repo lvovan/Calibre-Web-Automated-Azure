@@ -1,5 +1,10 @@
 {% import 'image.html' as image %}
 {% extends "layout.html" %}
+{% block header %}
+{% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+<link href="{{ url_for('static', filename='css/bulk-edit.css') }}" rel="stylesheet">
+{% endif %}
+{% endblock %}
 {% block body %}
 <div class="discover">
     {% if page == 'search' %}
@@ -60,9 +65,13 @@
         <a id="pub_new" data-toggle="tooltip" title="{{_('Sort according to publishing date, newest first')}}" class="btn btn-primary{% if order == "pubnew" %} active{% endif%}" href="{{url_for('web.books_list', data=page, sort_param='pubnew', query=query)}}"><span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order"></span></a>
         <a id="pub_old" data-toggle="tooltip" title="{{_('Sort according to publishing date, oldest first')}}" class="btn btn-primary{% if order == "pubold" %} active{% endif%}" href="{{url_for('web.books_list', data=page, sort_param='pubold', query=query)}}"><span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order-alt"></span></a>
       </div>
+      {% if current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+      {% include 'bulk_book_toolbar.html' %}
+      <p id="bulk-book-notice" role="status" aria-live="polite"></p>
+      {% endif %}
   {% endif %}
 
-  <div class="row display-flex">
+  <div class="row display-flex" data-bulk-book-grid>
     {% for entry in entries %}
     <div class="col-sm-3 col-lg-2 col-xs-6 book isotope-item session">
       <div class="cover">
@@ -134,4 +143,17 @@
     {% endfor %}
   </div>
 </div>
+{% endblock %}
+{% block modal %}
+{{ super() }}
+{% if entries and current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+{% include 'bulk_edit.html' %}
+{% endif %}
+{% endblock %}
+{% block js %}
+{{ super() }}
+{% if entries and current_user.is_authenticated and (current_user.role_admin() or current_user.role_edit()) %}
+<script src="{{ url_for('static', filename='js/libs/Sortable.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bulk-edit.js') }}"></script>
+{% endif %}
 {% endblock %}

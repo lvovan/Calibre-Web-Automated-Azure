@@ -145,7 +145,7 @@ test("selection controls track mode and selected count through clearing and exit
     const ids = Object.fromEntries(["bulk-book-config", "bulkBookModal", "bulk-book-select", "bulk-book-actions",
         "bulk-book-count", "bulk-book-edit", "bulk-book-all", "bulk-book-notice", "bulk-book-clear"].map(id => [id, element()]));
     ids["bulk-book-config"].textContent = JSON.stringify({text: {
-        select: "Select", selectCount: "Select (%(count)s)", selected: "%(count)s selected", selectBook: "Select book %(id)s"
+        select: "Select", cancel: "Cancel", selected: "%(count)s selected", selectBook: "Select book %(id)s"
     }});
     const cards = [1, 2, 3].map(id => {
         const card = element(), cover = element(), link = {dataset: {bookId: String(id)}};
@@ -169,12 +169,15 @@ test("selection controls track mode and selected count through clearing and exit
     button.events.click();
     assert.equal(grid.classList.contains("bulk-selecting"), true);
     assert.equal(ids["bulk-book-actions"].hidden, false);
+    assert.equal(button.textContent, "Cancel");
     grid.events.change({target: {dataset: {bulkId: "1"}}});
-    assert.equal(button.textContent, "Select (1)");
+    assert.equal(button.textContent, "Cancel");
+    assert.equal(ids["bulk-book-count"].textContent, "1 selected");
     ids["bulk-book-all"].events.change({target: {checked: true}});
-    assert.equal(button.textContent, "Select (3)");
+    assert.equal(button.textContent, "Cancel");
+    assert.equal(ids["bulk-book-count"].textContent, "3 selected");
     ids["bulk-book-clear"].events.click();
-    assert.equal(button.textContent, "Select");
+    assert.equal(button.textContent, "Cancel");
     assert.equal(grid.classList.contains("bulk-selecting"), true);
     grid.events.change({target: {dataset: {bulkId: "2"}}});
     button.events.click();

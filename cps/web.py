@@ -947,7 +947,7 @@ def render_magic_shelf(shelf_id, sort_param, page):
     except Exception as e:
         log.error(f"Error retrieving books for magic shelf {shelf_id}: {e}")
         flash(_("Error loading magic shelf"), category="error")
-        return redirect(url_for('web.index'))
+        return redirect(url_for('web.books_list', data='newest', sort_param='stored'))
     
     # Create proper pagination object
     from .pagination import Pagination
@@ -1035,6 +1035,14 @@ def index(page):
             flash(arch_warning, category="cwa_arch_warning")
 
     sort_param = (request.args.get('sort') or 'stored').lower()
+    if current_user.is_authenticated:
+        shelf = ub.session.query(ub.MagicShelf).filter(
+            ub.MagicShelf.user_id == current_user.id,
+            ub.MagicShelf.is_system == True,
+            ub.MagicShelf.name == magic_shelf.SYSTEM_SHELF_TEMPLATES['currently_reading']['name'],
+        ).first()
+        if shelf:
+            return redirect(url_for('web.render_magic_shelf', shelf_id=shelf.id, sort_param=sort_param, page=page))
     return render_books_list("newest", sort_param, 1, page)
 
 

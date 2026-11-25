@@ -70,6 +70,12 @@ bounded edges and **Reset zoom**. Pinches/pans never trigger page turns; a new p
 resets zoom. Changing image resolution keeps zoom, and rotation refits the image.
 This is custom image zoom, not browser-wide page zoom.
 
+The bottom-right counter shows current/total pages (CFI reading positions for EPUB),
+and follows the actual reader position, not slider previews. Reader surfaces and
+controls default to black with light text; EPUB's theme button can still switch to
+light reading. The progress slider has a 150px touch area (five times its previous
+30px height), a 30px track and a 48x60px thumb, including native IE11 range styling.
+
 ## Publication isolation and bounds
 
 Publication resources require both a filtered book and the viewer role. The

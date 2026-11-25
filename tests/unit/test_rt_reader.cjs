@@ -141,7 +141,7 @@ function immersiveHarness(kind='pages') {
       getBoundingClientRect:()=>({left:0,top:0,width:1000,height:800}),setAttribute(){},removeAttribute(){},
       focus(){document.activeElement=this;}};
   }
-  for(const name of ['reader-stage','reader-modal','reader-dialog','reading-progress','progress-label','page-image','reader-menu','dialog-close','fullscreen','reset-zoom','reader-return']) nodes[name]=node(name);
+  for(const name of ['reader-stage','reader-modal','reader-dialog','reading-progress','progress-label','reader-page-counter','page-image','reader-menu','dialog-close','fullscreen','reset-zoom','reader-return']) nodes[name]=node(name);
   if(kind!=='pages') delete nodes['page-image'];
   const document=node('document');document.getElementById=name=>nodes[name];document.documentElement=node('root');
   const window=node('window');window.setTimeout=fn=>{timers.set(++id,fn);return id;};window.clearTimeout=id=>timers.delete(id);
@@ -215,4 +215,17 @@ test('audio progress starts at zero seconds and seeks the displayed elapsed time
   assert.equal(h.nodes['reading-progress'].value,0);
   h.nodes['reading-progress'].value='20';h.nodes['reading-progress'].emit('change');
   assert.deepEqual(h.calls,[['seek',20]]);
+});
+
+test('corner counter follows actual progress rather than slider preview and clears on teardown', () => {
+  const h=immersiveHarness();h.ui.progress(2,10);
+  assert.equal(h.nodes['reader-page-counter'].textContent,'3/10');
+  assert.equal(h.nodes['reader-page-counter'].hidden,false);
+  h.nodes['reading-progress'].emit('pointerdown');
+  h.nodes['reading-progress'].value='7';h.nodes['reading-progress'].emit('input');
+  assert.equal(h.nodes['reader-page-counter'].textContent,'3/10');
+  h.ui.progress(6,10);assert.equal(h.nodes['reader-page-counter'].textContent,'7/10');
+  h.ui.destroy();assert.equal(h.nodes['reader-page-counter'].hidden,true);
+  const audio=immersiveHarness('audio');audio.ui.progress(20,60);
+  assert.equal(audio.nodes['reader-page-counter'].hidden,true);
 });

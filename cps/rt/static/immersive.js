@@ -5,6 +5,7 @@
     var stage = document.getElementById('reader-stage'), modal = document.getElementById('reader-modal');
     var dialog = document.getElementById('reader-dialog'), slider = document.getElementById('reading-progress');
     var label = document.getElementById('progress-label'), image = document.getElementById('page-image');
+    var counter = document.getElementById('reader-page-counter');
     var listeners = [], destroyed = false, timer, dragging = false, position = 0, count = 0;
     var zoom = 1, offsetX = 0, offsetY = 0, fitWidth = 0, fitHeight = 0, fullscreenAttempted = false;
     function listen(target, name, handler) {
@@ -30,6 +31,11 @@
       slider.min = config.kind === 'audio' ? 0 : 1;
       slider.max = Math.max(1, total);
       var value = current + (config.kind === 'audio' ? 0 : 1);
+      counter.hidden = total < 1 || config.kind === 'audio';
+      if (!counter.hidden) {
+        counter.textContent = value + '/' + total;
+        counter.setAttribute('aria-label', (config.kind === 'epub' ? config.labels.position : config.labels.page) + ' ' + value + ' / ' + total);
+      }
       if (!dragging) { slider.value = value; progressLabel(value); }
     }
     function enterFullscreen() {
@@ -170,7 +176,7 @@
     listen(document, 'MSFullscreenError', function (error) { actions.error(config.labels.fullscreenFailed, error); });
     return {
       open: open, progress: progress, imageLoaded: paint, resetZoom: resetZoom, isOpen: function () { return !modal.hidden; },
-      positionError: function () { label.textContent = config.labels.positionsFailed; },
+      positionError: function () { label.textContent = config.labels.positionsFailed; counter.hidden = true; },
       bindContents: function (contents) {
         var frame = contents.window.frameElement;
         var remove = gestures(contents.document, function (event) {
@@ -182,6 +188,7 @@
       destroy: function () {
         destroyed = true; window.clearTimeout(timer); listeners.forEach(function (remove) { remove(); }); listeners = [];
         slider.disabled = true;
+        counter.hidden = true;
         var exit = document.exitFullscreen || document.msExitFullscreen;
         if (exit && (document.fullscreenElement || document.msFullscreenElement)) {
           var result = exit.call(document); if (result && result.catch) result.catch(function (error) { actions.error(config.labels.fullscreenFailed, error); });

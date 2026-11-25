@@ -143,14 +143,20 @@
       var href = this.value;
       if (href) operation(function () { return rendition.display(href); });
     };
-    var font = 100, dark = false;
+    var font = 100, dark = true;
+    function applyTheme() {
+      rendition.themes.default({html: {background: dark ? '#000000' : '#ffffff'},
+        body: {color: dark ? '#eeeeee' : '#202020', background: dark ? '#000000' : '#ffffff'},
+        a: {color: dark ? '#8acbff' : '#124e88'}});
+    }
+    applyTheme();
     function resizeFont(delta) { if (!closed) { font = Math.max(70, Math.min(200, font + delta)); rendition.themes.fontSize(font + '%'); } }
     document.getElementById('smaller').onclick = function () { resizeFont(-10); };
     document.getElementById('larger').onclick = function () { resizeFont(10); };
     document.getElementById('theme').onclick = function () {
       if (closed) return;
       dark = !dark;
-      rendition.themes.default({body: {color: dark ? '#eeeeee' : '#202020', background: dark ? '#202020' : '#ffffff'}});
+      applyTheme();
     };
     operation(function () { return rendition.display(config.bookmark || undefined).then(function () { if (!closed) status.textContent = config.labels.ready; }); });
     book.ready.then(function () { if (!closed) return book.locations.generate(1200); }).then(function () {

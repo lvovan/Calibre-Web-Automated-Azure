@@ -7,11 +7,12 @@
   var book, rendition, closed = false, busy = false, saveTimer, pending, saving = false, lastSaved;
   var image, preloads = [], page = 0, total = 0;
   var currentCfi, positionsReady = false, returnRequested = false;
+  var font = config.fontSize, fontSaved = font, fontTimer, fontPending, fontSaving = false;
   var immersive = window.RTImmersive(config, {navigate: navigate, seek: seek,
     resize: function (width, height) { if (!closed && rendition) rendition.resize(width, height); },
     error: function (message, error) { status.textContent = message; if (window.console) window.console.error(message, error); }});
   function returnToBook() {
-    if (returnRequested && config.returnUrl && !saving && pending === undefined) window.location.assign(config.returnUrl);
+    if (returnRequested && config.returnUrl && !saving && pending === undefined && !fontSaving && fontPending === undefined) window.location.assign(config.returnUrl);
   }
   function failure(error) {
     status.textContent = config.labels.failed;
@@ -58,10 +59,34 @@
     pending = value;
     if (saveTimer === undefined) saveTimer = window.setTimeout(flush, 750);
   }
+  function flushFont() {
+    if (!config.fontSaveUrl || fontPending === undefined || fontSaving) return;
+    var value = fontPending;
+    fontPending = undefined; fontSaving = true;
+    xhr('POST', config.fontSaveUrl, 'font_size=' + encodeURIComponent(value), function (error) {
+      fontSaving = false;
+      var message = document.getElementById('font-save-status');
+      if (error) {
+        message.textContent = config.labels.fontSaveFailed;
+        if (window.console && window.console.error) window.console.error('RT font size:', error);
+        if (fontPending === undefined) fontPending = value;
+        return;
+      }
+      fontSaved = value; message.textContent = config.labels.fontSaved;
+      if (fontPending === fontSaved) fontPending = undefined;
+      if (fontPending !== undefined) flushFont(); else returnToBook();
+    });
+  }
+  function saveFont() {
+    if (!config.fontSaveUrl || (font === fontSaved && !fontSaving && fontPending === undefined)) return;
+    fontPending = font; flushFont();
+  }
   function closeReader(leave) {
     if (closed) return;
     returnRequested = leave === true;
     closed = true;
+    window.clearTimeout(fontTimer);
+    saveFont();
     window.clearTimeout(saveTimer);
     flush();
     if (book) book.destroy();
@@ -143,19 +168,29 @@
       var href = this.value;
       if (href) operation(function () { return rendition.display(href); });
     };
-    var font = 100, dark = true;
+    var dark = true, fontSlider = document.getElementById('font-size');
+    document.getElementById('night-mode').checked = dark;
     function applyTheme() {
       rendition.themes.default({html: {background: dark ? '#000000' : '#ffffff'},
         body: {color: dark ? '#eeeeee' : '#202020', background: dark ? '#000000' : '#ffffff'},
         a: {color: dark ? '#8acbff' : '#124e88'}});
     }
     applyTheme();
-    function resizeFont(delta) { if (!closed) { font = Math.max(70, Math.min(200, font + delta)); rendition.themes.fontSize(font + '%'); } }
+    function applyFont() { if (!closed) rendition.themes.fontSize(font + '%'); }
+    function selectFont(value) {
+      font = Math.max(70, Math.min(200, Math.round(value)));
+      fontSlider.value = font; document.getElementById('font-size-value').textContent = font + '%';
+    }
+    function commitFont() { window.clearTimeout(fontTimer); applyFont(); saveFont(); }
+    applyFont();
+    fontSlider.oninput = function () { if (!closed) { selectFont(Number(this.value)); window.clearTimeout(fontTimer); fontTimer = window.setTimeout(applyFont, 100); } };
+    fontSlider.onchange = function () { if (!closed) { selectFont(Number(this.value)); commitFont(); } };
+    function resizeFont(delta) { if (!closed) { selectFont(font + delta); commitFont(); } }
     document.getElementById('smaller').onclick = function () { resizeFont(-10); };
     document.getElementById('larger').onclick = function () { resizeFont(10); };
-    document.getElementById('theme').onclick = function () {
+    document.getElementById('night-mode').onchange = function () {
       if (closed) return;
-      dark = !dark;
+      dark = this.checked;
       applyTheme();
     };
     operation(function () { return rendition.display(config.bookmark || undefined).then(function () { if (!closed) status.textContent = config.labels.ready; }); });
@@ -220,6 +255,7 @@
   else { status.textContent = config.labels.ready; if (config.kind === 'txt') { save(String(config.page)); immersive.progress(config.page, config.total); } }
   if (config.kind === 'djvu') document.getElementById('progress-label').textContent = config.labels.externalPages;
   document.getElementById('close-reader').onclick = function () { closeReader(true); };
+  document.getElementById('reader-details').onclick = function (event) { event.preventDefault(); closeReader(true); };
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flush(); });
   window.addEventListener('pagehide', closeReader);
   window.addEventListener('beforeunload', flush);

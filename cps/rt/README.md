@@ -72,9 +72,18 @@ This is custom image zoom, not browser-wide page zoom.
 
 The bottom-right counter shows current/total pages (CFI reading positions for EPUB),
 and follows the actual reader position, not slider previews. Reader surfaces and
-controls default to black with light text; EPUB's theme button can still switch to
-light reading. The progress slider has a 150px touch area (five times its previous
+controls default to black with light text; EPUB's **Night mode** checkbox switches
+between dark and light reading. The progress slider has a 150px touch area (five times its previous
 30px height), a 30px track and a 48x60px thumb, including native IE11 range styling.
+
+The EPUB font-size slider previews 70%-200% text size. On release it saves to the
+signed-in user's existing `view_settings.rt_epub.font_size` in `app.db`, shared
+across RT EPUB/KEPUB books, not main-site readers. Other user settings are preserved;
+no schema migration is required. Anonymous readers can resize without account
+persistence. The RT-only preference POST requires authentication, viewer permission
+and CSRF; database failures roll back and report an error. Close reader/Book details
+wait for outstanding font saves as well as bookmarks. Night mode starts enabled;
+it is not an additional account preference.
 
 ## Publication isolation and bounds
 

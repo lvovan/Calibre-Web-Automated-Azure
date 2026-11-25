@@ -8,6 +8,7 @@ import ast
 import gzip
 import importlib.util
 import io
+import json
 import logging
 import os
 import shutil
@@ -23,6 +24,9 @@ from flask import Flask, abort, flash
 from flask_babel import Babel
 from flask_wtf.csrf import CSRFProtect
 from PIL import Image
+from sqlalchemy import Column, Integer, JSON, create_engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, declarative_base
 
 REPO = Path(__file__).resolve().parents[2]
 IE = "Mozilla/5.0 (Windows NT 6.3; ARM; Trident/7.0; Touch; rv:11.0) like Gecko"
@@ -53,9 +57,10 @@ def rt_app(tmp_path, monkeypatch):
         setattr(d, module, load(name + "." + module, REPO / "cps" / (module + ".py")))
     d.Pagination = load(name + ".pagination", REPO / "cps" / "pagination.py").Pagination
     state = SimpleNamespace(viewer=True, authenticated=True, visible=True, download=True)
-    user = SimpleNamespace(id=1, locale="en", role_viewer=lambda: state.viewer,
+    user = SimpleNamespace(id=1, locale="en", view_settings={}, role_viewer=lambda: state.viewer,
                            role_download=lambda: state.download, is_authenticated=True)
     d.current_user = user
+    d.ub = SimpleNamespace(session=SimpleNamespace(commit=lambda: None, rollback=lambda: None))
     d.config = SimpleNamespace(config_use_google_drive=False, config_rarfile_location="",
                                config_disable_standard_login=False, config_login_type=0,
                                config_remote_login=False, config_anonbrowse=0,
@@ -151,6 +156,86 @@ def rt_app(tmp_path, monkeypatch):
     app.register_blueprint(module.rt)
     return SimpleNamespace(app=app, client=app.test_client(), state=state, deps=d, path=tmp_path,
                            routes=sys.modules[name + ".rt.routes"], routing=sys.modules[name + ".rt.routing"])
+
+
+@pytest.fixture
+def preferences_db(rt_app):
+    base = declarative_base()
+
+    class User(base):
+        __tablename__ = "users"
+        id = Column(Integer, primary_key=True)
+        view_settings = Column(JSON)
+
+    engine = create_engine("sqlite://")
+    base.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            users = [User(id=1, view_settings={"table": {"columns": ["title"]}}),
+                     User(id=2, view_settings={})]
+            for user in users:
+                for name, value in vars(rt_app.deps.current_user).items():
+                    if name not in ("id", "view_settings"):
+                        setattr(user, name, value)
+            session.add_all(users)
+            session.commit()
+            rt_app.deps.ub.session = session
+            rt_app.deps.current_user = users[0]
+            yield SimpleNamespace(session=session, users=users)
+    finally:
+        engine.dispose()
+
+
+def test_epub_font_persists_per_account_across_books_without_changing_other_settings(rt_app, preferences_db):
+    first, second = preferences_db.users
+    assert rt_app.client.post("/rt/preferences/epub", data={"font_size": "150", "user_id": "2"}).status_code == 204
+    preferences_db.session.expire_all()
+    assert first.view_settings == {"table": {"columns": ["title"]}, "rt_epub": {"font_size": 150}}
+    assert second.view_settings == {}
+    original = rt_app.deps.calibre_db.get_filtered_book(1)
+    another = SimpleNamespace(**dict(vars(original), id=2))
+    rt_app.deps.calibre_db.get_filtered_book = lambda book_id: {1: original, 2: another}.get(book_id)
+
+    def font_size(book_id):
+        response = rt_app.client.get(f"/rt/read/{book_id}/epub")
+        assert response.status_code == 200
+        payload = response.get_data(as_text=True).split('<script id="rt-config" type="application/json">')[1].split("</script>")[0]
+        return json.loads(payload)["fontSize"]
+
+    assert font_size(1) == font_size(2) == 150
+    rt_app.deps.current_user = second
+    assert font_size(1) == 100
+
+
+def test_epub_font_validation_permissions_and_csrf(rt_app):
+    for value in ("69", "201", "nan", "100.5", ""):
+        assert rt_app.client.post("/rt/preferences/epub", data={"font_size": value}).status_code == 400
+    assert rt_app.deps.current_user.view_settings == {}
+    rt_app.state.viewer = False
+    assert rt_app.client.post("/rt/preferences/epub", data={"font_size": "120"}).status_code == 403
+    rt_app.state.viewer = True
+    rt_app.state.authenticated = False
+    assert rt_app.client.post("/rt/preferences/epub", data={"font_size": "120"}).status_code == 401
+    rt_app.state.authenticated = True
+    rt_app.deps.config.config_anonbrowse = 1
+    rt_app.deps.current_user.is_authenticated = False
+    assert rt_app.client.post("/rt/preferences/epub", data={"font_size": "120"}).status_code == 401
+    rt_app.deps.current_user.is_authenticated = True
+    rt_app.deps.config.config_anonbrowse = 0
+    rt_app.app.config["WTF_CSRF_ENABLED"] = True
+    assert rt_app.client.post("/rt/preferences/epub", data={"font_size": "120"}).status_code == 400
+    assert rt_app.deps.current_user.view_settings == {}
+
+
+def test_epub_font_database_failure_rolls_back_and_is_not_success(rt_app, preferences_db, monkeypatch, caplog):
+    def failed_commit():
+        raise SQLAlchemyError("test commit failure")
+
+    monkeypatch.setattr(preferences_db.session, "commit", failed_commit)
+    response = rt_app.client.post("/rt/preferences/epub", data={"font_size": "150"})
+    assert response.status_code == 503
+    assert preferences_db.users[0].view_settings == {"table": {"columns": ["title"]}}
+    assert "Unable to save RT EPUB font size" in caplog.text
 
 
 @pytest.mark.parametrize("path,target", [("/", "/rt/"), ("/page/2", "/rt/page/2"),

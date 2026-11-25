@@ -11,6 +11,7 @@ from pathlib import Path
 import bleach
 import chardet
 from PIL import Image, ImageOps, UnidentifiedImageError
+from sqlalchemy.exc import SQLAlchemyError
 from flask import abort, flash, make_response, redirect, render_template, request, url_for
 from flask_babel import gettext as _
 from werkzeug.exceptions import HTTPException
@@ -22,6 +23,41 @@ TEXT_PAGE = 20000
 MAX_TEXT = 8 * 1024 * 1024
 FORMATS = {"epub", "kepub", "pdf", "cbz", "cbr", "cbt", "txt", "djvu", "djv"}
 FORMATS.update(d.constants.EXTENSIONS_AUDIO)
+
+
+def epub_font_size():
+    value = ((d.current_user.view_settings or {}).get("rt_epub") or {}).get("font_size", 100)
+    if isinstance(value, int) and 70 <= value <= 200:
+        return value
+    d.log.warning("Invalid RT EPUB font size for user %s", d.current_user.id)
+    return 100
+
+
+@rt.route("/preferences/epub", methods=["POST"])
+@d.login_required_if_no_ano
+@d.viewer_required
+def save_epub_preferences():
+    if not d.current_user.is_authenticated:
+        abort(401)
+    try:
+        size = int(request.form.get("font_size", ""))
+    except ValueError:
+        abort(400, description=_("Invalid font size."))
+    if not 70 <= size <= 200:
+        abort(400, description=_("Invalid font size."))
+    settings = dict(d.current_user.view_settings or {})
+    preferences = dict(settings.get("rt_epub", {}))
+    preferences["font_size"] = size
+    settings["rt_epub"] = preferences
+    user_id = d.current_user.id
+    try:
+        d.current_user.view_settings = settings
+        d.ub.session.commit()
+    except SQLAlchemyError:
+        d.ub.session.rollback()
+        d.log.error("Unable to save RT EPUB font size for user %s", user_id, exc_info=True)
+        abort(503, description=_("Unable to save reader preferences."))
+    return "", 204
 
 
 def render(template, **context):
@@ -267,7 +303,9 @@ def reader(book_id, book_format):
         try:
             meta = d.epub_resources.describe(path)
             data.update(kind="epub", opf=url_for("rt.epub_resource", book_id=book_id,
-                        book_format=book_format, version=meta["revision"], resource=meta["opf"]))
+                        book_format=book_format, version=meta["revision"], resource=meta["opf"]),
+                        fontSize=epub_font_size(),
+                        fontSaveUrl=url_for("rt.save_epub_preferences") if d.current_user.is_authenticated else None)
         except (d.epub_resources.EpubResourceError, OSError) as error:
             d.log.warning("RT EPUB failed for book %s: %s", book_id, error)
             abort(422)

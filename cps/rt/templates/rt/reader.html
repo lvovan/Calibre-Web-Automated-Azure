@@ -20,10 +20,17 @@
 <div class="reader-dialog-content">
 <h1 id="reader-dialog-title" class="reader-title">{{ title }}</h1>
 <p>{% for author in entry.authors %}{{ author.name }}{% if not loop.last %}, {% endif %}{% endfor %} &mdash; {{ book_format.upper() }}</p>
-<a href="{{ url_for('rt.book', book_id=entry.id) }}">{{ _('Book details') }}</a>
+<a id="reader-details" href="{{ url_for('rt.book', book_id=entry.id) }}">{{ _('Book details') }}</a>
 <p><label for="reading-progress">{{ _('Reading progress') }}</label>
-<input id="reading-progress" type="range" min="1" max="1" value="1" disabled>
+<input id="reading-progress" class="reader-slider" type="range" min="1" max="1" value="1" disabled>
 <span id="progress-label" aria-live="polite">{{ _('Preparing reading positions') }}</span></p>
+{% if reader.kind == 'epub' %}
+<p><label for="font-size">{{ _('Font size') }}</label>
+<input id="font-size" class="reader-slider" type="range" min="70" max="200" step="5" value="{{ reader.fontSize }}">
+<span id="font-size-value">{{ reader.fontSize }}%</span></p>
+<p><label><input id="night-mode" type="checkbox" checked>{{ _('Night mode') }}</label></p>
+<p id="font-save-status" role="status" aria-live="polite">{% if not user.is_authenticated %}{{ _('Sign in to save your font size across books.') }}{% endif %}</p>
+{% endif %}
 {% if reader.kind in ['epub', 'pages'] %}
 <div class="toolbar">
   <button id="previous" type="button">{{ _('Previous') }}</button>
@@ -32,7 +39,6 @@
   <label for="toc">{{ _('Contents') }}</label><select id="toc"><option value="">{{ _('Select chapter') }}</option></select>
   <button id="smaller" type="button" aria-label="{{ _('Smaller text') }}">A-</button>
   <button id="larger" type="button" aria-label="{{ _('Larger text') }}">A+</button>
-  <button id="theme" type="button">{{ _('Change theme') }}</button>
   {% else %}
   <label for="page-number">{{ _('Page') }}</label><input id="page-number" type="number" min="1" value="1">
   <button id="go" type="button">{{ _('Go') }}</button><span id="page-count"></span>
@@ -49,7 +55,7 @@
 <a id="reader-return" href="{{ url_for('rt.book', book_id=entry.id) }}" hidden>{{ _('Return to book') }}</a>
 </div></section></div>
 <noscript>{{ _('JavaScript must be enabled to use this reader.') }}</noscript>
-<script id="rt-config" type="application/json">{{ dict(reader, labels=dict(loading=_('Loading'), ready=_('Ready'), failed=_('Unable to load the book.'), saveFailed=_('Unable to save reading position.'), saved=_('Reading position saved.'), closed=_('Reader closed.'), audioFailed=_('This browser cannot play this audio format.'), page=_('Page'), position=_('Reading position'), time=_('Playback position (seconds)'), externalPages=_("Use the document's page controls."), fullscreenFailed=_('Full screen is unavailable; using full-window mode.'), positionsFailed=_('Unable to prepare reading positions. Chapter navigation is still available.')))|tojson }}</script>
+<script id="rt-config" type="application/json">{{ dict(reader, labels=dict(loading=_('Loading'), ready=_('Ready'), failed=_('Unable to load the book.'), saveFailed=_('Unable to save reading position.'), saved=_('Reading position saved.'), fontSaved=_('Font size saved for your account.'), fontSaveFailed=_('Unable to save font size.'), closed=_('Reader closed.'), audioFailed=_('This browser cannot play this audio format.'), page=_('Page'), position=_('Reading position'), time=_('Playback position (seconds)'), externalPages=_("Use the document's page controls."), fullscreenFailed=_('Full screen is unavailable; using full-window mode.'), positionsFailed=_('Unable to prepare reading positions. Chapter navigation is still available.')))|tojson }}</script>
 {% endblock %}
 {% block scripts %}
 {% if reader.kind == 'epub' %}

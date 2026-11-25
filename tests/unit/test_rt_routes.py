@@ -69,6 +69,7 @@ def rt_app(tmp_path, monkeypatch):
     Image.new("RGB", (2400, 3200), "white").save(output, "JPEG")
     with zipfile.ZipFile(tmp_path / "sample.cbz", "w") as archive:
         archive.writestr("p1.jpg", output.getvalue())
+        archive.writestr("p2.jpg", output.getvalue())
     Image.new("RGB", (400, 600), "blue").save(tmp_path / "cover.jpg")
     (tmp_path / "sample.txt").write_text("hello <script>alert(1)</script> " * 2000, encoding="utf-8")
     (tmp_path / "sample.m4b").write_bytes(b"audio")
@@ -137,7 +138,8 @@ def rt_app(tmp_path, monkeypatch):
     app.add_url_rule("/logout", "web.logout", lambda: "logout")
     app.add_url_rule("/download/<int:book_id>/<book_format>", "web.download_link", lambda **kw: "download")
     app.add_url_rule("/show/<int:book_id>/<book_format>", "web.serve_book", lambda **kw: "media")
-    app.add_url_rule("/comic/<int:book_id>/<book_format>/pages", "web.comic_pages", lambda **kw: {"pages": [1]})
+    app.add_url_rule("/comic/<int:book_id>/<book_format>/pages", "web.comic_pages",
+                     lambda **kw: {"pages": d.comic_pages.list_pages(tmp_path / "sample.cbz")})
     app.add_url_rule("/ajax/bookmark/<int:book_id>/<book_format>", "web.set_bookmark", lambda **kw: ("", 204), methods=["POST"])
 
     @app.after_request

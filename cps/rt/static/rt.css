@@ -40,3 +40,21 @@ audio { width: 95%; margin: 20px 0; }
 #djvuContainer { height: 75vh; width: 100%; }
 @media (max-width: 500px) { header, main { padding: 8px; } .books li { width: 140px; min-height: 320px; } }
 @media (max-width: 600px) { .cover { float: none; display: block; margin: 0 auto 16px; } .book-info { overflow: visible; } }
+.immersive-reader { overflow: hidden; background: #151515; }
+.immersive-reader > header { display: none; }
+.immersive-reader > main { position: fixed; top: 0; left: 0; width: 100%; height: 100%; max-width: none; margin: 0; padding: 0; }
+#reader-stage { position: absolute; top: 0; left: 0; width: 100%; height: 100%; outline: none; overflow: hidden; }
+.immersive-reader #viewer { width: 100%; height: 100%; min-height: 0; border: 0; }
+.immersive-reader #page-viewer { width: 100%; height: 100%; overflow: hidden; touch-action: none; -ms-touch-action: none; }
+.immersive-reader #page-image { position: absolute; top: 50%; left: 50%; max-width: none; max-height: none; margin: 0; transform-origin: 0 0; -ms-transform-origin: 0 0; touch-action: none; -ms-touch-action: none; -ms-user-select: none; user-select: none; }
+.immersive-reader .text-reader { height: 100%; max-width: none; margin: 0; padding: 24px; overflow: auto; background: #f7f5ef; color: #202b38; }
+.immersive-reader #djvuContainer { width: 100%; height: 100%; }
+#reader-menu { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); -ms-transform: translateX(-50%); z-index: 2; opacity: 0; }
+#reader-menu:focus { opacity: 0.8; }
+.reader-modal { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; padding: 16px; overflow: auto; background: rgba(0,0,0,0.65); }
+[hidden] { display: none !important; }
+#reader-dialog { position: relative; max-width: 680px; margin: 20px auto; padding: 24px; border-radius: 6px; background: #f7f5ef; color: #202b38; }
+.reader-dialog-content { max-height: calc(100vh - 120px); overflow: auto; }
+#reader-dialog-title { padding-right: 48px; }
+#dialog-close { position: absolute; top: 4px; right: 4px; min-width: 44px; }
+#reading-progress { display: block; width: 95%; max-width: 95%; }

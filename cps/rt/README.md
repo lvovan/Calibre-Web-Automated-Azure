@@ -39,6 +39,37 @@ assets are separate from the main theme. No Node tooling is needed in production
 The main login POST, OAuth routes, downloads, media and bookmark endpoints remain
 authoritative; failed legacy login renders bounce back with flashes preserved.
 
+## Immersive reading
+
+The reader fills the browser viewport without site navigation. The first content
+tap requests true browser fullscreen when supported; the dialog's **Full screen**
+button can retry. Browsers which disallow that API still use the full-window layout.
+Resize, rotation and fullscreen changes refit images and resize EPUB pagination,
+retaining the reading position.
+
+Tap the leftmost 20% for Previous, the rightmost 20% for Next, and the top 20% of
+the middle 60% to open book controls. EPUB events are attached inside sandboxed
+Contents documents and removed when each Contents is destroyed. In-book links,
+form controls, drags and multi-touch gestures do not become page taps.
+
+The dialog shows title, authors, format and reading progress, plus existing chapter,
+font/theme or image-resolution controls. **X**, Escape or the backdrop dismisses it;
+Tab focus stays inside the dialog. Its X remains outside the scrollable content on
+short displays. **Close reader** clears owned frames/images and waits for the last
+bookmark write before returning to book details. A failed save remains visible.
+
+Comic/PDF image pages have an exact page slider. TXT uses its server page index.
+EPUBs use generated CFI reading positions (1,200-character intervals), explicitly
+labelled **Reading position**, not invented printed page numbers: pagination changes
+with viewport and font size, so jumping aligns to the rendered page containing the
+requested CFI. Generation is serial and its queue stops on book teardown. Audio
+progress uses elapsed seconds; the legacy DjVu engine retains its own page controls.
+
+Comic/PDF images support two-pointer pinch zoom (1x-5x), single-pointer panning,
+bounded edges and **Reset zoom**. Pinches/pans never trigger page turns; a new page
+resets zoom. Changing image resolution keeps zoom, and rotation refits the image.
+This is custom image zoom, not browser-wide page zoom.
+
 ## Publication isolation and bounds
 
 Publication resources require both a filtered book and the viewer role. The

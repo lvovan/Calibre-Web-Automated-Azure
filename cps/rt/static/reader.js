@@ -6,8 +6,16 @@
   var saveStatus = document.getElementById('save-status');
   var book, rendition, closed = false, busy = false, saveTimer, pending, saving = false, lastSaved;
   var image, preloads = [], page = 0, total = 0;
+  var currentCfi, positionsReady = false, returnRequested = false;
+  var immersive = window.RTImmersive(config, {navigate: navigate, seek: seek,
+    resize: function (width, height) { if (!closed && rendition) rendition.resize(width, height); },
+    error: function (message, error) { status.textContent = message; if (window.console) window.console.error(message, error); }});
+  function returnToBook() {
+    if (returnRequested && config.returnUrl && !saving && pending === undefined) window.location.assign(config.returnUrl);
+  }
   function failure(error) {
     status.textContent = config.labels.failed;
+    if (!closed) immersive.open();
     if (window.console && window.console.error) window.console.error('RT reader:', error);
   }
   function xhr(method, url, body, done) {
@@ -42,6 +50,7 @@
         saveStatus.textContent = config.labels.saved;
       }
       if (pending !== undefined) flush();
+      else if (!error) returnToBook();
     });
   }
   function save(value) {
@@ -49,13 +58,15 @@
     pending = value;
     if (saveTimer === undefined) saveTimer = window.setTimeout(flush, 750);
   }
-  function closeReader() {
+  function closeReader(leave) {
     if (closed) return;
+    returnRequested = leave === true;
     closed = true;
     window.clearTimeout(saveTimer);
     flush();
     if (book) book.destroy();
     book = rendition = null;
+    immersive.destroy();
     preloads = [];
     if (image) { image.onload = image.onerror = null; image.removeAttribute('src'); }
     var viewer = document.getElementById('viewer');
@@ -65,6 +76,7 @@
     document.getElementById('previous') && (document.getElementById('previous').disabled = true);
     document.getElementById('next') && (document.getElementById('next').disabled = true);
     status.textContent = config.labels.closed;
+    returnToBook();
   }
   function operation(work) {
     if (busy || closed) return;
@@ -78,7 +90,10 @@
   }
   function displayPage(index) {
     if (closed || !total || !isFinite(index)) return;
-    page = Math.max(0, Math.min(total - 1, Math.floor(index)));
+    index = Math.max(0, Math.min(total - 1, Math.floor(index)));
+    if (index !== page) immersive.resetZoom();
+    page = index;
+    immersive.progress(page, total);
     status.textContent = config.labels.loading;
     document.getElementById('page-number').value = page + 1;
     document.getElementById('previous').disabled = page === 0;
@@ -86,13 +101,29 @@
     image.src = pageUrl(page);
   }
   function navigate(delta) {
+    if (closed) return;
     if (config.kind === 'epub') operation(function () { return delta < 0 ? rendition.prev() : rendition.next(); });
+    else if (config.kind === 'txt') seek(config.page + delta);
     else displayPage(page + delta);
+  }
+  function seek(index) {
+    if (closed || !isFinite(index)) return;
+    if (config.kind === 'epub' && positionsReady) {
+      index = Math.max(0, Math.min(book.locations.length() - 1, Math.floor(index)));
+      operation(function () { return rendition.display(book.locations.cfiFromLocation(index)); });
+    } else if (config.kind === 'pages') displayPage(index);
+    else if (config.kind === 'txt' && index >= 0 && index < config.total) window.location.assign(config.textUrl + '?page=' + (index + 1));
+    else if (config.kind === 'audio') document.getElementById('audio').currentTime = index;
   }
   function epub() {
     book = window.ePub(config.opf, {openAs: 'opf', replacements: 'none'});
     rendition = book.renderTo('viewer', {width: '100%', height: '100%', allowScriptedContent: false});
-    rendition.on('relocated', function (location) { if (!closed && location.start) save(location.start.cfi); });
+    rendition.hooks.content.register(function (contents) { if (!closed) immersive.bindContents(contents); });
+    rendition.on('relocated', function (location) {
+      if (closed || !location.start) return;
+      currentCfi = location.start.cfi; save(currentCfi);
+      if (positionsReady) immersive.progress(book.locations.locationFromCfi(currentCfi), book.locations.length());
+    });
     rendition.on('displayerror', failure);
     book.loaded.navigation.then(function (navigation) {
       if (closed) return;
@@ -122,12 +153,21 @@
       rendition.themes.default({body: {color: dark ? '#eeeeee' : '#202020', background: dark ? '#202020' : '#ffffff'}});
     };
     operation(function () { return rendition.display(config.bookmark || undefined).then(function () { if (!closed) status.textContent = config.labels.ready; }); });
+    book.ready.then(function () { if (!closed) return book.locations.generate(1200); }).then(function () {
+      if (closed) return;
+      if (!book.locations.length()) { status.textContent = config.labels.positionsFailed; immersive.positionError(); return; }
+      positionsReady = true;
+      immersive.progress(currentCfi ? book.locations.locationFromCfi(currentCfi) : 0, book.locations.length());
+    }, function (error) {
+      if (!closed) { status.textContent = config.labels.positionsFailed; immersive.positionError(); if (window.console) window.console.error(config.labels.positionsFailed, error); }
+    });
   }
   function pages() {
     image = document.getElementById('page-image');
     image.onload = function () {
       if (closed) return;
       status.textContent = config.labels.ready + ' ' + (page + 1) + '/' + total;
+      immersive.imageLoaded();
       save(String(page));
       preloads = [];
       [page - 1, page + 1].forEach(function (index) {
@@ -148,14 +188,6 @@
     });
     document.getElementById('go').onclick = function () { displayPage(Number(document.getElementById('page-number').value) - 1); };
     document.getElementById('resolution').onchange = function () { displayPage(page); };
-    var startX, startY;
-    image.addEventListener('pointerdown', function (event) { startX = event.clientX; startY = event.clientY; });
-    image.addEventListener('pointerup', function (event) {
-      var dx = event.clientX - startX, dy = event.clientY - startY;
-      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) navigate(dx > 0 ? -1 : 1);
-      startX = startY = undefined;
-    });
-    image.addEventListener('pointercancel', function () { startX = startY = undefined; });
   }
   function audioReader() {
     var audio = document.getElementById('audio');
@@ -163,22 +195,25 @@
       var position = Number(config.bookmark) / 1000;
       if (isFinite(position) && position > 0 && position < audio.duration) audio.currentTime = position;
       status.textContent = config.labels.ready;
+      if (isFinite(audio.duration)) immersive.progress(Math.floor(audio.currentTime), Math.ceil(audio.duration));
     });
-    audio.addEventListener('timeupdate', function () { save(String(Math.floor(audio.currentTime * 1000))); });
+    audio.addEventListener('timeupdate', function () { save(String(Math.floor(audio.currentTime * 1000))); if (isFinite(audio.duration)) immersive.progress(Math.floor(audio.currentTime), Math.ceil(audio.duration)); });
     audio.addEventListener('pause', function () { save(String(Math.floor(audio.currentTime * 1000))); flush(); });
     audio.addEventListener('error', function () { status.textContent = config.labels.audioFailed; });
   }
   if (config.kind === 'epub' || config.kind === 'pages') {
     document.getElementById('previous').onclick = function () { navigate(-1); };
     document.getElementById('next').onclick = function () { navigate(1); };
-    document.getElementById('close-reader').onclick = closeReader;
     document.addEventListener('keydown', function (event) {
       if (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(event.target.tagName)) return;
+      if (immersive.isOpen()) return;
       if (event.keyCode === 37 || event.keyCode === 39) { event.preventDefault(); navigate(event.keyCode === 37 ? -1 : 1); }
     });
     if (config.kind === 'epub') epub(); else pages();
   } else if (config.kind === 'audio') audioReader();
-  else { status.textContent = config.labels.ready; if (config.kind === 'txt') save(String(config.page)); }
+  else { status.textContent = config.labels.ready; if (config.kind === 'txt') { save(String(config.page)); immersive.progress(config.page, config.total); } }
+  if (config.kind === 'djvu') document.getElementById('progress-label').textContent = config.labels.externalPages;
+  document.getElementById('close-reader').onclick = function () { closeReader(true); };
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flush(); });
   window.addEventListener('pagehide', closeReader);
   window.addEventListener('beforeunload', flush);

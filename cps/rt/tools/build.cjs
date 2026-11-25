@@ -21,7 +21,7 @@ fs.mkdirSync(path.join(directory, 'vendor'), {recursive: true});
 fs.writeFileSync(path.join(directory, 'vendor', 'epub.legacy.js'), code);
 fs.copyFileSync(require.resolve('core-js-bundle/minified.js'), path.join(directory, 'vendor', 'core-js.js'));
 fs.copyFileSync(require.resolve('core-js-bundle/LICENSE'), path.join(directory, 'vendor', 'core-js.LICENSE'));
-for (const file of ['vendor/epub.legacy.js', 'vendor/core-js.js', 'reader.js', 'epub-lifecycle.js']) {
+for (const file of ['vendor/epub.legacy.js', 'vendor/core-js.js', 'reader.js', 'immersive.js', 'epub-lifecycle.js']) {
   acorn.parse(fs.readFileSync(path.join(directory, file), 'utf8'), {ecmaVersion: 5});
 }
 console.log('RT assets built; all browser scripts parse as ES5.');

@@ -259,6 +259,7 @@ def reader(book_id, book_format):
         return redirect(url_for("rt.book", book_id=book_id))
     path = local_path(book_id, book_format)
     data = {"format": book_format, "bookmark": d.bookmark(book_id, book_format),
+            "returnUrl": url_for("rt.book", book_id=book_id),
             "saveUrl": url_for("web.set_bookmark", book_id=book_id, book_format=book_format.upper())
             if d.current_user.is_authenticated else None}
     text, pagination = "", None
@@ -290,7 +291,8 @@ def reader(book_id, book_format):
         if page > max(1, pagination.pages):
             abort(404)
         text = content[(page - 1) * TEXT_PAGE:page * TEXT_PAGE]
-        data.update(kind="txt", page=page - 1)
+        data.update(kind="txt", page=page - 1, total=max(1, pagination.pages),
+                    textUrl=url_for("rt.reader", book_id=book_id, book_format=book_format))
     elif book_format in ("djvu", "djv"):
         data.update(kind="djvu")
     else:

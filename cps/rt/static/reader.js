@@ -8,8 +8,14 @@
   var image, preloads = [], page = 0, total = 0;
   var currentCfi, positionsReady = false, returnRequested = false;
   var font = config.fontSize, fontSaved = font, fontTimer, fontPending, fontSaving = false;
+  var spread;
   var immersive = window.RTImmersive(config, {navigate: navigate, seek: seek,
-    resize: function (width, height) { if (!closed && rendition) rendition.resize(width, height); },
+    resize: function (width, height) {
+      if (closed || !rendition) return;
+      var next = epubSpread(width, height);
+      if (next !== spread) { spread = next; rendition.spread(spread); }
+      if (rendition.manager && rendition.manager.isRendered()) rendition.resize(width, height, currentCfi);
+    },
     error: function (message, error) { status.textContent = message; if (window.console) window.console.error(message, error); }});
   function returnToBook() {
     if (returnRequested && config.returnUrl && !saving && pending === undefined && !fontSaving && fontPending === undefined) window.location.assign(config.returnUrl);
@@ -140,9 +146,13 @@
     else if (config.kind === 'txt' && index >= 0 && index < config.total) window.location.assign(config.textUrl + '?page=' + (index + 1));
     else if (config.kind === 'audio') document.getElementById('audio').currentTime = index;
   }
+  function epubSpread(width, height) { return width > height ? 'auto' : 'none'; }
   function epub() {
     book = window.ePub(config.opf, {openAs: 'opf', replacements: 'none'});
-    rendition = book.renderTo('viewer', {width: '100%', height: '100%', allowScriptedContent: false});
+    var stage = document.getElementById('reader-stage');
+    spread = epubSpread(stage.clientWidth, stage.clientHeight);
+    rendition = book.renderTo('viewer', {width: '100%', height: '100%', allowScriptedContent: false,
+      spread: spread, minSpreadWidth: 1});
     rendition.hooks.content.register(function (contents) { if (!closed) immersive.bindContents(contents); });
     rendition.on('relocated', function (location) {
       if (closed || !location.start) return;

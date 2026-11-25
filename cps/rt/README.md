@@ -47,6 +47,10 @@ button can retry. Browsers which disallow that API still use the full-window lay
 Resize, rotation and fullscreen changes refit images and resize EPUB pagination,
 retaining the reading position.
 
+RT EPUB pagination explicitly uses one column when the reader viewport is portrait
+and two columns in landscape. Spread selection follows viewport dimensions rather
+than epub.js's default minimum-width heuristic, both on opening and on rotation.
+
 Tap the leftmost 20% for Previous, the rightmost 20% for Next, and the top 20% of
 the middle 60% to open book controls. EPUB events are attached inside sandboxed
 Contents documents and removed when each Contents is destroyed. In-book links,

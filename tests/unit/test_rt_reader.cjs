@@ -56,15 +56,16 @@ test('live contents can suspend and resume without accumulating visibility liste
 });
 
 function readerHarness(overrides={}) {
-  const events={}, timers=new Map(), requests=[], nodes={}, redirects=[], fonts=[], themes=[];let id=0;
+  const events={}, timers=new Map(), requests=[], nodes={}, redirects=[], fonts=[], themes=[], layouts=[];let id=0, actions, renderOptions;
   const config={kind:'pages', bookmark:'1', pageUrl:'/rt/page/1/cbz/0',listUrl:'/comic/1/cbz/pages',
     saveUrl:'/ajax/bookmark/1/CBZ',labels:{loading:'loading',ready:'ready',failed:'failed',closed:'closed',saved:'saved',saveFailed:'save failed'}};
   Object.assign(config,overrides);
-  for (const name of ['rt-config','reader-status','save-status','previous','next','page-number','resolution','page-image','page-count','go','close-reader','reader-details','audio','font-size','font-size-value','font-save-status','night-mode','toc','smaller','larger']) {
+  for (const name of ['rt-config','reader-stage','reader-status','save-status','previous','next','page-number','resolution','page-image','page-count','go','close-reader','reader-details','audio','font-size','font-size-value','font-save-status','night-mode','toc','smaller','larger']) {
     nodes[name]={textContent:'',value:name==='resolution'?'1600':'',disabled:false,listeners:{},
       addEventListener(name,fn) {this.listeners[name]=fn;},removeAttribute(name) {delete this[name];},pause() {},load() {}};
   }
   nodes['rt-config'].textContent=JSON.stringify(config);
+  nodes['reader-stage'].clientWidth=overrides.width||1000;nodes['reader-stage'].clientHeight=overrides.height||800;
   class XHR {
     open(method,url) {this.method=method;this.url=url;}
     setRequestHeader() {}
@@ -74,16 +75,17 @@ function readerHarness(overrides={}) {
   const window={setTimeout:fn=>{timers.set(++id,fn);return id;},clearTimeout:id=>timers.delete(id),
     addEventListener:(name,fn)=>{events[name]=fn;},console:{error() {}},
     location:{assign:url=>redirects.push(url)},
-    RTImmersive:()=>({open() {},positionError() {},destroy() {},resetZoom() {},progress() {},imageLoaded() {},isOpen:()=>false})};
+    RTImmersive:(_config,callbacks)=>{actions=callbacks;return {open() {},positionError() {},destroy() {},resetZoom() {},progress() {},imageLoaded() {},isOpen:()=>false};}};
   const waiting={then(){return this;}};
-  window.ePub=()=>({renderTo:()=>({hooks:{content:{register(){}}},on(){},
-    themes:{default:theme=>themes.push(theme),fontSize:size=>fonts.push(size)},display:()=>waiting}),
+  window.ePub=()=>({renderTo:(_target,options)=>{renderOptions=options;return {hooks:{content:{register(){}}},on(){},manager:{isRendered:()=>true},
+    spread:mode=>layouts.push(['spread',mode]),resize:(w,h,cfi)=>layouts.push(['resize',w,h,cfi]),
+    themes:{default:theme=>themes.push(theme),fontSize:size=>fonts.push(size)},display:()=>waiting};},
     loaded:{navigation:waiting},ready:waiting,destroy(){}});
   const document={getElementById:name=>nodes[name]||null,querySelector:()=>({content:'csrf'}),
     addEventListener:(name,fn)=>{events[name]=fn;}};
   vm.runInNewContext(fs.readFileSync(path.join(assets,'reader.js'),'utf8'),{window,document,XMLHttpRequest:XHR,Image:class {},isFinite,JSON,Number,Math,Error});
   function flush() {for (const [id,fn] of [...timers]) {timers.delete(id);fn();}}
-  return {nodes,requests,events,flush,timers,redirects,fonts,themes};
+  return {nodes,requests,events,flush,timers,redirects,fonts,themes,layouts,renderOptions,resize:(w,h)=>actions.resize(w,h)};
 }
 
 test('page reader clamps navigation, serializes bookmark writes and clears on close', () => {
@@ -257,4 +259,16 @@ test('failed account font save is visible and closing retries before returning',
   h.nodes['close-reader'].onclick();assert.equal(h.requests[1].body,'font_size=150');
   assert.deepEqual(h.redirects,[]);
   h.requests[1].complete(204);assert.deepEqual(h.redirects,['/rt/book/1']);
+});
+
+test('RT EPUB starts single-column in portrait and switches spreads only on orientation changes', () => {
+  const h=readerHarness({kind:'epub',fontSize:100,width:900,height:1200});
+  assert.equal(h.renderOptions.spread,'none');assert.equal(h.renderOptions.minSpreadWidth,1);
+  h.resize(1200,900);h.resize(1400,900);h.resize(900,1400);
+  assert.deepEqual(h.layouts,[['spread','auto'],['resize',1200,900,undefined],
+    ['resize',1400,900,undefined],['spread','none'],['resize',900,1400,undefined]]);
+  const landscape=readerHarness({kind:'epub',fontSize:100,width:1200,height:900});
+  assert.equal(landscape.renderOptions.spread,'auto');
+  h.nodes['close-reader'].onclick();const before=h.layouts.length;h.resize(1400,900);
+  assert.equal(h.layouts.length,before);
 });

@@ -4,6 +4,10 @@
 
 ## Making Calibre-Web your _dream_, all-in-one self-hosted digital library solution.
 
+**Surface RT / IE11:** an isolated reading interface is available at `/rt/` and is
+automatically selected for IE11 clients. Use **Full site** to opt out. See the
+[RT module documentation](cps/rt/README.md) for supported formats and limitations.
+
 ![Docker Pulls](https://img.shields.io/docker/pulls/crocodilestick/calibre-web-automated)
 ![GitHub Release](https://img.shields.io/github/v/release/crocodilestick/calibre-web-automated)
 ![GitHub commits since latest release](https://img.shields.io/github/commits-since/crocodilestick/calibre-web-automated/latest)

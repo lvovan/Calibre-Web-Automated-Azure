@@ -1,0 +1,22 @@
+{% extends 'rt/layout.html' %}
+{% block body %}
+<h1>{{ _('Login') }}</h1>
+{% if not config.config_disable_standard_login %}
+<form action="{{ url_for('web.login_post') }}" method="post" class="login">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <p><label for="username">{{ _('Username') }}</label><input id="username" name="username" autocomplete="username" required></p>
+  <p><label for="password">{{ _('Password') }}</label><input id="password" name="password" type="password" autocomplete="current-password" required></p>
+  <p><label><input type="checkbox" name="remember_me"> {{ _('Remember Me') }}</label></p>
+  <button type="submit">{{ _('Login') }}</button>
+</form>
+{% else %}
+<p>{{ _('Standard login is disabled. Please use one of the alternative login methods.') }}</p>
+{% endif %}
+{% if config.config_login_type == 2 %}
+{% for provider, endpoint, label in [(3, 'oauth.generic_login', _('Log in with SSO')), (1, 'oauth.github_login', _('Login with GitHub')), (2, 'oauth.google_login', _('Login with Google'))] %}
+{% if provider in oauth_check %}<p><a href="{{ url_for(endpoint) }}">{{ label }}</a></p>{% endif %}
+{% endfor %}
+{% endif %}
+{% if config.config_remote_login %}<p><a href="{{ url_for('remotelogin.remote_login') }}">{{ _('Log in with Magic Link') }}</a></p>{% endif %}
+{% endblock %}

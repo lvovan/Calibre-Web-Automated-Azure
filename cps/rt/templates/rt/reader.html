@@ -1,0 +1,52 @@
+{% extends 'rt/layout.html' %}
+{% block head %}
+{% if reader.kind == 'djvu' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/libs/Djvu_html5.css') }}">{% endif %}
+{% endblock %}
+{% block body %}
+<h1 class="reader-title">{{ title }}</h1>
+<a href="{{ url_for('rt.book', book_id=entry.id) }}">{{ _('Book details') }}</a>
+{% if reader.kind in ['epub', 'pages'] %}
+<div class="toolbar">
+  <button id="previous" type="button">{{ _('Previous') }}</button>
+  <button id="next" type="button">{{ _('Next') }}</button>
+  {% if reader.kind == 'epub' %}
+  <label for="toc">{{ _('Contents') }}</label><select id="toc"><option value="">{{ _('Select chapter') }}</option></select>
+  <button id="smaller" type="button" aria-label="{{ _('Smaller text') }}">A-</button>
+  <button id="larger" type="button" aria-label="{{ _('Larger text') }}">A+</button>
+  <button id="theme" type="button">{{ _('Change theme') }}</button>
+  {% else %}
+  <label for="page-number">{{ _('Page') }}</label><input id="page-number" type="number" min="1" value="1">
+  <button id="go" type="button">{{ _('Go') }}</button><span id="page-count"></span>
+  <label for="resolution">{{ _('Image size') }}</label><select id="resolution"><option value="800">800</option><option value="1200">1200</option><option value="1600" selected>1600</option><option value="2400">2400</option></select>
+  {% endif %}
+  <button id="close-reader" type="button">{{ _('Close reader') }}</button>
+</div>
+{% endif %}
+<p id="reader-status" role="status" aria-live="polite">{{ _('Loading') }}</p>
+<p id="save-status" role="status" aria-live="polite"></p>
+{% if reader.kind == 'epub' %}<div id="viewer"></div>
+{% elif reader.kind == 'pages' %}<div id="page-viewer"><img id="page-image" alt="{{ _('Book page') }}"></div>
+{% elif reader.kind == 'txt' %}
+<pre class="text-reader">{{ text }}</pre>
+<nav>
+{% if pagination.has_prev %}<a href="{{ url_for('rt.reader', book_id=entry.id, book_format=book_format, page=pagination.page-1) }}">{{ _('Previous') }}</a>{% endif %}
+<span>{{ pagination.page }} / {{ [pagination.pages, 1]|max }}</span>
+{% if pagination.has_next %}<a href="{{ url_for('rt.reader', book_id=entry.id, book_format=book_format, page=pagination.page+1) }}">{{ _('Next') }}</a>{% endif %}
+</nav>
+{% elif reader.kind == 'audio' %}
+<audio id="audio" controls preload="metadata" src="{{ url_for('web.serve_book', book_id=entry.id, book_format=book_format) }}">{{ _('This browser cannot play this audio format.') }}</audio>
+{% elif reader.kind == 'djvu' %}
+<div id="djvuContainer" file="{{ url_for('web.serve_book', book_id=entry.id, book_format=book_format) }}"></div>
+{% endif %}
+<noscript>{{ _('JavaScript must be enabled to use this reader.') }}</noscript>
+<script id="rt-config" type="application/json">{{ dict(reader, labels=dict(loading=_('Loading'), ready=_('Ready'), failed=_('Unable to load the book.'), saveFailed=_('Unable to save reading position.'), saved=_('Reading position saved.'), closed=_('Reader closed.'), audioFailed=_('This browser cannot play this audio format.')))|tojson }}</script>
+{% endblock %}
+{% block scripts %}
+{% if reader.kind == 'epub' %}
+<script src="{{ url_for('rt.static', filename='vendor/core-js.js') }}"></script>
+<script src="{{ url_for('rt.static', filename='vendor/epub.legacy.js') }}"></script>
+<script src="{{ url_for('rt.static', filename='epub-lifecycle.js') }}"></script>
+{% endif %}
+{% if reader.kind == 'djvu' %}<script src="{{ url_for('static', filename='js/libs/djvu_html5/djvu_html5/djvu_html5.nocache.js') }}"></script>{% endif %}
+<script src="{{ url_for('rt.static', filename='reader.js') }}"></script>
+{% endblock %}

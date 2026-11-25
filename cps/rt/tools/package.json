@@ -1,0 +1,12 @@
+{
+  "name": "cwa-rt-assets",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {"build": "node build.cjs", "test": "node --test ../../../tests/unit/test_rt_reader.cjs"},
+  "devDependencies": {
+    "@babel/core": "7.27.4",
+    "@babel/preset-env": "7.27.2",
+    "acorn": "8.15.0",
+    "core-js-bundle": "3.43.0"
+  }
+}

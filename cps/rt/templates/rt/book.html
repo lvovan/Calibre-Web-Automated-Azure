@@ -1,0 +1,15 @@
+{% extends 'rt/layout.html' %}
+{% block body %}
+<h1>{{ entry.title }}</h1>
+<img class="cover" src="{{ url_for('rt.cover', book_id=entry.id, w=400) }}" alt="{{ _('Cover') }}">
+<p>{% for author in entry.authors %}{{ author.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+<p class="description">{{ description }}</p>
+<ul>
+{% for data in entry.data %}
+<li>{{ data.format }}
+  {% if user.role_viewer() and data.format.lower() in formats %}<a class="button" href="{{ url_for('rt.reader', book_id=entry.id, book_format=data.format.lower()) }}">{{ _('Read') }}</a>{% endif %}
+  {% if user.role_download() %}<a class="button" href="{{ url_for('web.download_link', book_id=entry.id, book_format=data.format.lower()) }}">{{ _('Download') }}</a>{% endif %}
+</li>
+{% endfor %}
+</ul>
+{% endblock %}

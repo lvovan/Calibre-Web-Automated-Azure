@@ -23,6 +23,7 @@ wiki_images
 tests/
 pytest.ini
 requirements-dev.txt
+cps/rt/tools/node_modules/
 TEST*.md
 TESTING*.md
 .pytest_cache/

@@ -1,0 +1,23 @@
+{% extends 'rt/layout.html' %}
+{% block body %}
+<h1>{{ title }}</h1>
+{% if shelves %}<nav class="shelves" aria-label="{{ _('Shelves') }}">
+{% for item in shelves %}<a href="{{ url_for('rt.shelf', shelf_id=item.id) }}">{{ item.name }}</a>{% endfor %}
+</nav>{% endif %}
+<ul class="books">
+{% for entry in entries %}
+<li>
+  <a href="{{ url_for('rt.book', book_id=entry.id) }}">
+    <img src="{{ url_for('rt.cover', book_id=entry.id) }}" width="120" height="160" alt="">
+    <strong>{{ entry.title }}</strong>
+  </a>
+  <p>{% for author in entry.authors %}{{ author.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+</li>
+{% else %}<li>{{ _('No books found.') }}</li>{% endfor %}
+</ul>
+<nav class="pagination" aria-label="{{ _('Pages') }}">
+{% if pagination.has_prev %}<a href="{{ url_for('rt.shelf', shelf_id=shelf_id, page=pagination.page-1) if shelf_id else url_for('rt.index', page=pagination.page-1, query=query) }}">{{ _('Previous') }}</a>{% endif %}
+<span>{{ pagination.page }} / {{ [pagination.pages, 1]|max }}</span>
+{% if pagination.has_next %}<a href="{{ url_for('rt.shelf', shelf_id=shelf_id, page=pagination.page+1) if shelf_id else url_for('rt.index', page=pagination.page+1, query=query) }}">{{ _('Next') }}</a>{% endif %}
+</nav>
+{% endblock %}

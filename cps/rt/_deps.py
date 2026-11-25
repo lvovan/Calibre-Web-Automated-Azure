@@ -5,7 +5,7 @@
 """The only adapter between the RT interface and application internals."""
 
 from .. import calibre_db, config, db, ub, logger, constants
-from .. import comic_pages, epub_resources, pdf_pages
+from .. import comic_pages, epub_resources, pdf_pages, magic_shelf
 from ..cw_login import current_user
 from ..pagination import Pagination
 from ..usermanagement import login_required_if_no_ano
@@ -16,7 +16,8 @@ from ..search import library_search_error
 __all__ = ["calibre_db", "config", "db", "ub", "constants", "comic_pages", "epub_resources",
            "pdf_pages", "current_user", "Pagination", "login_required_if_no_ano", "viewer_required",
            "_epub_path", "_comic_archive_path", "oauth_bb", "feature_support",
-           "check_shelf_view_permissions", "library_search_error", "log", "bookmark", "shelves"]
+           "check_shelf_view_permissions", "library_search_error", "log", "bookmark", "shelves",
+           "magic_shelf", "magic_shelves"]
 
 log = logger.create()
 
@@ -35,3 +36,7 @@ def shelves():
     return ub.session.query(ub.Shelf).filter(or_(
         ub.Shelf.is_public == 1, ub.Shelf.user_id == current_user.id
     )).order_by(ub.Shelf.name).limit(100).all()
+
+
+def magic_shelves():
+    return magic_shelf.get_visible_magic_shelves_for_user(current_user.id)[:100]

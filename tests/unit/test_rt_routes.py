@@ -5,6 +5,7 @@
 """Exercise the complete RT blueprint with isolated application dependencies."""
 
 import ast
+import gzip
 import importlib.util
 import io
 import logging
@@ -81,6 +82,8 @@ def rt_app(tmp_path, monkeypatch):
     d.db = SimpleNamespace(Books=SimpleNamespace(timestamp=column, sort=column))
     d.log = logging.getLogger(__name__)
     d.shelves = lambda: []
+    d.magic_shelves = lambda: []
+    d.magic_shelf = SimpleNamespace(build_query_from_rules=lambda *args, **kwargs: True)
     d.bookmark = lambda *args: ""
     d.oauth_bb = SimpleNamespace(oauth_check={})
     d.feature_support = {"oauth": False}
@@ -121,6 +124,7 @@ def rt_app(tmp_path, monkeypatch):
     app.add_url_rule("/book/<int:book_id>", "web.show_book", lambda book_id: "modern")
     app.add_url_rule("/read/<int:book_id>/<book_format>", "web.read_book", lambda **kw: "modern")
     app.add_url_rule("/shelf/<int:shelf_id>", "shelf.show_shelf", lambda **kw: "modern")
+    app.add_url_rule("/magicshelf/<int:shelf_id>", "web.render_magic_shelf", lambda **kw: "modern")
     app.add_url_rule("/login", "web.login", lambda: "modern")
 
     def failed_login():
@@ -149,7 +153,8 @@ def rt_app(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("path,target", [("/", "/rt/"), ("/page/2", "/rt/page/2"),
     ("/search?query=hello", "/rt/?query=hello"), ("/book/1", "/rt/book/1"),
-    ("/read/1/epub", "/rt/read/1/epub"), ("/login", "/rt/login"), ("/shelf/2", "/rt/shelf/2")])
+    ("/read/1/epub", "/rt/read/1/epub"), ("/login", "/rt/login"), ("/shelf/2", "/rt/shelf/2"),
+    ("/magicshelf/2", "/rt/magicshelf/2")])
 def test_detection_redirects_only_legacy_gets(rt_app, path, target):
     assert rt_app.client.get(path).status_code == 200
     response = rt_app.client.get(path, headers={"User-Agent": IE})
@@ -168,6 +173,64 @@ def test_cookie_escape_and_direct_rt_have_no_loop(rt_app):
     response = client.get("/", follow_redirects=True)
     assert response.status_code == 200 and len(response.history) == 1
     assert client.get("/rt/not-a-real-page").status_code == 404
+
+
+@pytest.mark.parametrize("encoding,expected", [
+    ("gzip, deflate", "gzip"), ("br, gzip;q=0.5, deflate", "gzip"),
+    ("gzip;q=0, deflate", None), ("identity", None), ("", None),
+])
+def test_actual_app_compression_serves_trident_decodable_assets(rt_app, encoding, expected):
+    from flask_compress import Compress
+    Compress(rt_app.app)
+    rt_app.app.add_url_rule("/modern-compressed", "modern_asset", lambda: "modern" * 200)
+    headers = {"Accept-Encoding": encoding, "User-Agent": IE}
+    for path, marker in [("/rt/static/rt.css", b"Segoe UI"),
+                         ("/rt/static/reader.js", b"audioReader"),
+                         ("/rt/read/1/epub", b"epub.legacy.js")]:
+        response = rt_app.client.get(path, headers=headers)
+        assert response.status_code == 200
+        actual = response.headers.get("Content-Encoding")
+        assert actual in (None, "gzip") if expected else actual is None
+        if path == "/rt/read/1/epub":
+            assert actual == expected
+        assert "Accept-Encoding" in response.vary
+        body = gzip.decompress(response.data) if actual == "gzip" else response.data
+        assert marker in body
+    response = rt_app.client.get("/modern-compressed", headers={"Accept-Encoding": "gzip, deflate"})
+    assert response.headers["Content-Encoding"] == "gzip"
+    response = rt_app.client.get("/static/js/libs/epub.min.js", headers={"Accept-Encoding": "gzip, deflate"})
+    assert response.headers["Content-Encoding"] == "deflate"
+
+
+def test_magic_shelf_stays_in_rt_and_enforces_visibility_and_rules(rt_app):
+    value = SimpleNamespace(id=2, name="Magic shelf", user_id=1, is_public=0,
+                            rules={"rules": [{"field": "title", "value": "Test"}]})
+    rt_app.deps.ub = SimpleNamespace(MagicShelf=SimpleNamespace(id=2),
+        session=SimpleNamespace(query=lambda model: SimpleNamespace(
+            filter=lambda condition: SimpleNamespace(first=lambda: value if condition else None))))
+    calls = []
+
+    def fill(page, pagesize, model, query_filter, order):
+        calls.append((page, pagesize, query_filter))
+        return [rt_app.deps.calibre_db.get_filtered_book(1)], None, rt_app.deps.Pagination(page, pagesize, 49)
+
+    rt_app.deps.calibre_db.fill_indexpage = fill
+    response = rt_app.client.get("/rt/magicshelf/2")
+    assert response.status_code == 200
+    assert b"/rt/magicshelf/2?page=2" in response.data and b"/rt/book/1" in response.data
+    assert calls == [(1, 24, True)]
+    assert rt_app.client.get("/rt/magicshelf/3").status_code == 404
+    value.user_id = 9
+    assert rt_app.client.get("/rt/magicshelf/2").status_code == 403
+    value.is_public = 1
+    assert rt_app.client.get("/rt/magicshelf/2").status_code == 200
+    value.rules = {}
+    assert b"No books found" in rt_app.client.get("/rt/magicshelf/2").data
+    value.rules = {"rules": [{}]}
+    rt_app.deps.magic_shelf.build_query_from_rules = lambda *args, **kwargs: None
+    assert rt_app.client.get("/rt/magicshelf/2").status_code == 422
+    rt_app.state.authenticated = False
+    assert rt_app.client.get("/rt/magicshelf/2").status_code == 401
 
 
 def test_main_post_is_not_redirected_before_processing_and_flashes_survive(rt_app):
@@ -266,7 +329,7 @@ def test_mapped_endpoints_exist_in_actual_source():
     # Guard the isolated endpoint allowlist against upstream renames.
     names = {"web": "web.py", "shelf": "shelf.py", "search": "search.py"}
     expected = {"web.index", "web.books_list", "web.show_book", "web.read_book", "web.login",
-                "search.simple_search", "search.advanced_search_form", "shelf.show_shelf"}
+                "search.simple_search", "search.advanced_search_form", "shelf.show_shelf", "web.render_magic_shelf"}
     for prefix, file in names.items():
         functions = {node.name for node in ast.parse((REPO / "cps" / file).read_text(encoding="utf-8")).body
                      if isinstance(node, ast.FunctionDef)}

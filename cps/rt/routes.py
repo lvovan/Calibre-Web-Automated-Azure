@@ -96,7 +96,8 @@ def index(page=1):
         entries, random_books, pagination = d.calibre_db.fill_indexpage(
             page, PAGE_SIZE, d.db.Books, True, [d.db.Books.timestamp.desc()])
     return render("catalog.html", title=_("Search") if query else _("Books"), entries=entries,
-                  pagination=pagination, query=query, shelves=d.shelves(), shelf_id=None)
+                  pagination=pagination, query=query, shelves=d.shelves(), magic_shelves=d.magic_shelves(),
+                  shelf_id=None, shelf_endpoint="rt.shelf")
 
 
 @rt.route("/shelf/<int:shelf_id>")
@@ -111,7 +112,30 @@ def shelf(shelf_id):
     entries, random_books, pagination = d.calibre_db.fill_indexpage(
         page, PAGE_SIZE, d.db.Books, d.db.Books.id.in_(ids), [d.db.Books.sort])
     return render("catalog.html", title=value.name, entries=entries, pagination=pagination,
-                  query="", shelves=d.shelves(), shelf_id=shelf_id)
+                  query="", shelves=d.shelves(), magic_shelves=d.magic_shelves(),
+                  shelf_id=shelf_id, shelf_endpoint="rt.shelf")
+
+
+@rt.route("/magicshelf/<int:shelf_id>")
+@d.login_required_if_no_ano
+def magic_shelf(shelf_id):
+    value = d.ub.session.query(d.ub.MagicShelf).filter(d.ub.MagicShelf.id == shelf_id).first()
+    if not value:
+        abort(404)
+    if value.user_id != d.current_user.id and value.is_public != 1:
+        abort(403)
+    page = max(1, request.args.get("page", 1, type=int))
+    entries, pagination = [], d.Pagination(page, PAGE_SIZE, 0)
+    if value.rules and value.rules.get("rules"):
+        query_filter = d.magic_shelf.build_query_from_rules(value.rules, user_id=value.user_id)
+        if query_filter is None:
+            d.log.warning("RT magic shelf %s has invalid rules", shelf_id)
+            abort(422, description=_("Error loading magic shelf"))
+        entries, random_books, pagination = d.calibre_db.fill_indexpage(
+            page, PAGE_SIZE, d.db.Books, query_filter, [d.db.Books.sort])
+    return render("catalog.html", title=value.name, entries=entries, pagination=pagination,
+                  query="", shelves=d.shelves(), magic_shelves=d.magic_shelves(),
+                  shelf_id=shelf_id, shelf_endpoint="rt.magic_shelf")
 
 
 @rt.route("/book/<int:book_id>")

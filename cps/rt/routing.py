@@ -6,7 +6,7 @@ from flask import g, request, redirect, url_for, session, get_flashed_messages
 
 from . import rt
 
-MAPPED = {"web.index", "web.books_list", "web.show_book", "web.read_book",
+MAPPED = {"web.index", "web.books_list", "web.show_book", "web.read_book", "web.render_magic_shelf",
           "search.simple_search", "search.advanced_search_form", "shelf.show_shelf", "web.login"}
 EPUB_POLICY = ("default-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
                "font-src 'self' data:; media-src 'none'; base-uri 'self'; form-action 'none'; "
@@ -22,6 +22,9 @@ def is_legacy_client():
 
 @rt.before_app_request
 def select_interface():
+    if request.blueprint == "rt":
+        # Trident's stylesheet/script loader cannot decode Flask-Compress deflate.
+        request.environ["HTTP_ACCEPT_ENCODING"] = "gzip" if request.accept_encodings["gzip"] > 0 else "identity"
     if request.method not in ("GET", "HEAD") or request.endpoint not in MAPPED or not is_legacy_client():
         return None
     args = request.view_args or {}
@@ -34,6 +37,8 @@ def select_interface():
         target = url_for("rt.login", next=request.args.get("next", url_for("rt.index")))
     elif endpoint == "shelf.show_shelf":
         target = url_for("rt.shelf", shelf_id=args["shelf_id"], page=args.get("page", 1))
+    elif endpoint == "web.render_magic_shelf":
+        target = url_for("rt.magic_shelf", shelf_id=args["shelf_id"], page=args.get("page", 1))
     elif endpoint.startswith("search.") or (endpoint == "web.books_list" and args.get("data") == "search"):
         target = url_for("rt.index", query=request.args.get("query", ""), page=args.get("page", 1))
     else:
@@ -58,7 +63,7 @@ def response_headers(response):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.vary.add("Cookie")
-        if request.endpoint in {"rt.index", "rt.book", "rt.reader", "rt.shelf", "rt.login"}:
+        if request.endpoint in {"rt.index", "rt.book", "rt.reader", "rt.shelf", "rt.magic_shelf", "rt.login"}:
             if request.cookies.get("cwa_ui") != "rt":
                 response.set_cookie("cwa_ui", "rt", max_age=31536000, path=request.script_root or "/",
                                     httponly=True, secure=request.is_secure, samesite="Lax")

@@ -12,8 +12,10 @@ Selection responses vary by Cookie/User-Agent and are not publicly cacheable.
 
 ## Scope
 
-- Paginated recent books, the existing library-search syntax, ordinary shelves,
-  book details and JPEG covers. Shelf books are sorted by title. Advanced main-site
+- Paginated recent books, the existing library-search syntax, ordinary and magic
+  shelves, book details and JPEG covers. Shelf books are sorted by title. Magic
+  shelves reuse the rule builder and library visibility filters, without the main
+  page's templates or cached unfiltered book retrieval. Advanced main-site
   list filters are not reproduced; those main list links land on recent books.
 - EPUB/KEPUB with TOC, font size, theme, exact CFI bookmarks and explicit cleanup.
 - CBZ/CBR/CBT and all PDF pages through server-rendered, bounded JPEGs. Default
@@ -28,7 +30,7 @@ Selection responses vary by Cookie/User-Agent and are not publicly cacheable.
   and cross-reader TXT position parity are not included. EPUB CFIs and comic/PDF
   page bookmarks are reused.
 - Local/mounted libraries only. Google Drive-backed reading, CB7, admin, editing,
-  upload, magic-shelf UI and full-site feature parity are outside this module.
+  upload, magic-shelf editing and full-site feature parity are outside this module.
   Downloads remain available when the user's role permits them.
 
 Only blueprint registration changes application Python outside this package.
@@ -48,6 +50,12 @@ never be served through a script-enabled RT frame.
 
 The RT shell uses external scripts only. DjVu alone retains the main GWT engine's
 inline/eval requirement; that exception does not apply to EPUBs or other readers.
+RT requests negotiate gzip or identity instead of Flask-Compress's preferred
+deflate. Native Trident loaded zero stylesheet rules with deflate, reproducing the
+unstyled deployed Surface pages; the compatible negotiation restored the actual
+font, spacing and book layout. Streaming assets may remain uncompressed. Main-site
+compression is unchanged. Render validation must enable application compression,
+not just exercise the bare Flask fixture.
 Image bytes are bounded by the existing archive helpers and Pillow's decompression
 bomb limit; every page, including JPEG passthrough from a PDF or comic, is resized
 to the requested bound. The server still has to decode the source image, so JPEG
